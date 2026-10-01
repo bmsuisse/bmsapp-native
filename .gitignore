@@ -16,9 +16,19 @@ __pycache__/
 
 # Secrets — never commit
 **/.env
-**/.env.local
+**/.env.*
+!**/.env.example
 **/keys/*.p8
+*.p8
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+credentials.json
+.npmrc
 .npmrc.local
+.pypirc
 
 # Editors & OS
 .DS_Store

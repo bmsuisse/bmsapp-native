@@ -179,11 +179,17 @@ async def on_device_registered(body: DeviceRegistration, context: WidgetRequestC
     device = my_store.get_or_create(body.device_id)
     if "push_token" in body.model_fields_set:
         device.push_token = body.push_token
-    if "user_email" in body.model_fields_set:
-        device.user_email = body.user_email  # may deliberately be None here
-    # Who is calling? Trust context.user (from your auth_dependency), not the body.
+    # Who owns the device comes from the verified login (`context.user`, from
+    # your auth_dependency), NEVER from `body.user_email` or `body.device_id`:
+    # that is client input, and anyone with a valid login could send any
+    # address and receive that person's pushes.
+    if isinstance(context.user, EntraUser):
+        device.user_email = context.user.email
     my_store.save(device)
 ```
+
+`body.user_email` is only the app's own hint (e.g. `null` right after a logout).
+Never route pushes, approvals or documents by it.
 
 **`LocationUpdate`**:
 
@@ -591,9 +597,20 @@ has it can send pushes to any device with one of our apps. Therefore:
 end-to-end with in-memory storage (no Postgres/Docker
 needed):
 
+The example is a local demo, not a deployment template: it refuses to start
+without Entra sign-in (`ENTRA_TENANT_ID`, see `.env.example`), and it keeps data
+in memory without per-user ownership checks. Do not expose it to a network.
+
 ```bash
-cp .env.example .env   # fill in APNs values
-uv run --group dev granian --interface asgi example.main:app --port 8000 --reload
+cp .env.example .env   # fill in APNs and Entra values
+uv run --group dev granian --interface asgi example.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+To try the `curl` calls below without any login (own machine only), opt out
+explicitly:
+
+```bash
+ALLOW_INSECURE_NO_AUTH=1 uv run --group dev granian --interface asgi example.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ```bash

@@ -13,6 +13,10 @@ on:
         type: boolean
         default: false
 
+# Least privilege by default; only the publish jobs get more.
+permissions:
+  contents: read
+
 # Two quick merges must not race each other into publishing the same version.
 concurrency:
   group: release
@@ -35,11 +39,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - id: npm
         name: 'Check @bmsuisse/app-native'
         run: |
           VERSION=$(node -p "require('./packages/app-native/package.json').version")
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]] || { echo "Invalid version: $VERSION" >&2; exit 1; }
           TAG="@bmsuisse/app-native@$VERSION"
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
             echo "release=false" >> "$GITHUB_OUTPUT"
@@ -52,6 +58,7 @@ jobs:
         name: 'Check bmsdna-app-native'
         run: |
           VERSION=$(grep -m1 '^version = ' python/app-native/pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]] || { echo "Invalid version: $VERSION" >&2; exit 1; }
           TAG="bmsdna-app-native@$VERSION"
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
             echo "release=false" >> "$GITHUB_OUTPUT"
@@ -61,15 +68,21 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Summary
+        env:
+          NPM_RELEASE: ${{ steps.npm.outputs.release }}
+          NPM_VERSION: ${{ steps.npm.outputs.version }}
+          PY_RELEASE: ${{ steps.python.outputs.release }}
+          PY_VERSION: ${{ steps.python.outputs.version }}
         run: |
-          echo "@bmsuisse/app-native: release=${{ steps.npm.outputs.release }}    version=${{ steps.npm.outputs.version }}"
-          echo "bmsdna-app-native:    release=${{ steps.python.outputs.release }} version=${{ steps.python.outputs.version }}"
+          echo "@bmsuisse/app-native: release=$NPM_RELEASE    version=$NPM_VERSION"
+          echo "bmsdna-app-native:    release=$PY_RELEASE version=$PY_VERSION"
 
   publish-npm:
     name: 'Publish @bmsuisse/app-native'
     needs: [test, plan]
     if: needs.plan.outputs.npm_release == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
     runs-on: ubuntu-latest
+    environment: npm
     permissions:
       contents: write
       id-token: write
@@ -89,14 +102,16 @@ jobs:
         working-directory: packages/app-native
         run: npm publish --access public --provenance
       - name: Tag release
+        env:
+          VERSION: ${{ needs.plan.outputs.npm_version }}
         run: |
-          git tag "@bmsuisse/app-native@${{ needs.plan.outputs.npm_version }}"
-          git push origin "@bmsuisse/app-native@${{ needs.plan.outputs.npm_version }}"
+          git tag "@bmsuisse/app-native@$VERSION"
+          git push origin "@bmsuisse/app-native@$VERSION"
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.npm_version }}
         run: |
-          VERSION="${{ needs.plan.outputs.npm_version }}"
           TAG="@bmsuisse/app-native@$VERSION"
           PREV_TAG=$(git tag -l '@bmsuisse/app-native@*' --sort=-creatordate | grep -vxF "$TAG" | head -n1)
           {
@@ -117,6 +132,7 @@ jobs:
     needs: [test, plan]
     if: needs.plan.outputs.python_release == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
     runs-on: ubuntu-latest
+    environment: pypi
     permissions:
       contents: write
       id-token: write
@@ -132,14 +148,16 @@ jobs:
         with:
           packages-dir: python/app-native/dist
       - name: Tag release
+        env:
+          VERSION: ${{ needs.plan.outputs.python_version }}
         run: |
-          git tag "bmsdna-app-native@${{ needs.plan.outputs.python_version }}"
-          git push origin "bmsdna-app-native@${{ needs.plan.outputs.python_version }}"
+          git tag "bmsdna-app-native@$VERSION"
+          git push origin "bmsdna-app-native@$VERSION"
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.python_version }}
         run: |
-          VERSION="${{ needs.plan.outputs.python_version }}"
           TAG="bmsdna-app-native@$VERSION"
           PREV_TAG=$(git tag -l 'bmsdna-app-native@*' --sort=-creatordate | grep -vxF "$TAG" | head -n1)
           {

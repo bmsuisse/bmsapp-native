@@ -2,10 +2,15 @@
 FastAPI backend. Runs without Postgres/Docker — storage here is deliberately
 in-memory only; in a real app you replace it with your own database.
 
-Run:
-    uv run --group dev granian --interface asgi example.main:app --port 8000 --reload
+Run (Entra sign-in configured, see .env.example):
+    uv run --group dev granian --interface asgi example.main:app --host 127.0.0.1 --port 8000 --reload
 
-Try it:
+The example refuses to start without ENTRA_TENANT_ID. To try the curl calls
+below on your own machine without any login, opt out explicitly (never on a
+reachable host):
+    ALLOW_INSECURE_NO_AUTH=1 uv run --group dev granian --interface asgi example.main:app --host 127.0.0.1 --port 8000 --reload
+
+Try it (in the no-login mode above):
     curl -X POST http://localhost:8000/api/devices \\
       -H "Content-Type: application/json" \\
       -d '{"device_id": "abc", "push_token": "<real-apns-token>"}'
@@ -32,6 +37,7 @@ Try it:
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -85,7 +91,7 @@ from bmsdna.app_native import (
     send_silent_push,
     send_widget_update,
 )
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 
 @dataclass
@@ -353,13 +359,26 @@ async def _on_live_activity_token(
 
 
 def _create_auth() -> Any:
-    # Without configuration the example runs without login so you can try it
-    # with curl. With ENTRA_TENANT_ID, ENTRA_AUDIENCE and SESSION_SECRET it
-    # checks the Entra token of the app and exchanges it for a session cookie,
-    # see docs/entra-token-guide.md. In a real backend you pass your own
-    # check if you prefer: a FastAPI dependency that raises 401/403 or returns
-    # the user.
+    # With ENTRA_TENANT_ID, ENTRA_AUDIENCE and SESSION_SECRET the example checks
+    # the Entra token of the app and exchanges it for a session cookie, see
+    # docs/entra-token-guide.md. In a real backend you pass your own check if
+    # you prefer: a FastAPI dependency that raises 401/403 or returns the user.
+    #
+    # Fails closed: without ENTRA_TENANT_ID the example refuses to start. To try
+    # it with curl on your own machine, opt out explicitly with
+    # ALLOW_INSECURE_NO_AUTH=1 (and keep it bound to 127.0.0.1).
     if not os.environ.get("ENTRA_TENANT_ID"):
+        if os.environ.get("ALLOW_INSECURE_NO_AUTH") != "1":
+            raise RuntimeError(
+                "ENTRA_TENANT_ID is not set. Configure Entra sign-in (see "
+                "docs/entra-token-guide.md) or, for local experiments only, set "
+                "ALLOW_INSECURE_NO_AUTH=1 to run without any login."
+            )
+        warnings.warn(
+            "Running WITHOUT authentication (ALLOW_INSECURE_NO_AUTH=1). "
+            "Never expose this process to a network.",
+            stacklevel=2,
+        )
         return insecure_no_auth
     return create_entra_auth_dependency(
         EntraTokenVerifier.from_env(),
@@ -408,7 +427,7 @@ app.include_router(
 )
 
 
-@app.post("/api/orders/{order_id}/advance")
+@app.post("/api/orders/{order_id}/advance", dependencies=[Depends(_auth)])
 async def advance_order(order_id: str) -> dict[str, Any]:
     token = _activity_tokens.get(order_id)
     if token is None:
@@ -442,7 +461,7 @@ async def livez() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/api/notify/{device_id}")
+@app.post("/api/notify/{device_id}", dependencies=[Depends(_auth)])
 async def notify(device_id: str, title: str, body: str) -> dict[str, Any]:
     """Shows the one-call push: `send_push()` directly from your own code."""
     device = _devices.get(device_id)
@@ -457,7 +476,7 @@ async def notify(device_id: str, title: str, body: str) -> dict[str, Any]:
     return {"sent": sent, "detail": detail}
 
 
-@app.post("/api/notify/{device_id}/order-request")
+@app.post("/api/notify/{device_id}/order-request", dependencies=[Depends(_auth)])
 async def notify_order_request(device_id: str, order_id: str) -> dict[str, Any]:
     """Shows a push with buttons in the notifications tab of the iOS app —
     defined entirely via `data={"actions": [...]}`, no app-side
@@ -483,7 +502,7 @@ async def notify_order_request(device_id: str, order_id: str) -> dict[str, Any]:
     return {"sent": sent, "detail": detail}
 
 
-@app.post("/api/notify/{device_id}/refresh")
+@app.post("/api/notify/{device_id}/refresh", dependencies=[Depends(_auth)])
 async def notify_refresh(device_id: str) -> dict[str, Any]:
     """Shows the silent push: triggers a WebView reload in the app without
     the user seeing anything. The app additionally throttles the actual
@@ -498,7 +517,7 @@ async def notify_refresh(device_id: str) -> dict[str, Any]:
     return {"sent": sent, "detail": detail}
 
 
-@app.post("/api/notify/{device_id}/widgets")
+@app.post("/api/notify/{device_id}/widgets", dependencies=[Depends(_auth)])
 async def notify_widgets(device_id: str) -> dict[str, Any]:
     """Shows `send_widget_update()`: updates the dashboard on the device via
     silent push, without the user opening the web app. `webapp_id` must
