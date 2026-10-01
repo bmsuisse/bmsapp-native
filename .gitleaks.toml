@@ -1,0 +1,12 @@
+title = "bmsapp-native gitleaks config"
+
+[extend]
+useDefault = true
+
+# apns.py checks that APNS_KEY starts with the PEM header literal and names it
+# in the error message. That is the format check, not a key. Allowlist exactly
+# that line (no path allowlist: gitleaks would skip the whole file).
+[[allowlists]]
+description = "PEM header literal in the APNS_KEY format check"
+regexTarget = "line"
+regexes = ['''if not key\.startswith\("-----BEGIN PRIVATE KEY-----"\):''']
