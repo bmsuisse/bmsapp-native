@@ -1,0 +1,44 @@
+{
+  "name": "@bmsuisse/app-native",
+  "version": "0.2.0",
+  "description": "Web app side of the BMS app: typed calls to window.BMSNative (chrome, toast, share, scan, widgets, Live Activities, approvals) with browser fallbacks.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bmsuisse/bmsapp-native.git",
+    "directory": "packages/app-native"
+  },
+  "homepage": "https://github.com/bmsuisse/bmsapp-native/tree/main/packages/app-native#readme",
+  "bugs": "https://github.com/bmsuisse/bmsapp-native/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src test",
+    "check": "bun run typecheck && bun run lint && bun run test",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "jsdom": "^27",
+    "typescript": "^5.9",
+    "vitest": "^4"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "title": "Order is being packed",
+  "subtitle": "Zürich branch",
+  "status": "Packing",
+  "steps": ["Ordered", "Packed", "Ready for pickup"],
+  "currentStep": 1,
+  "icon": "shippingbox",
+  "tint": "#2e4a62"
+}

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>bmsapp-native e2e</title>
+    <script>
+      // Like the app (WebView.nativeEnvironmentScript): set up BMSNative before
+      // any page script — here forwarding to the test harness.
+      if (!new URLSearchParams(location.search).has('browser')) {
+        const send = (message) =>
+          fetch('/native/' + message.action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(message),
+          }).then((r) => r.json())
+        window.BMSNative = Object.freeze({
+          isNativeApp: true,
+          platform: 'ios',
+          appVersion: 'e2e',
+          webAppId: 'e2e',
+          capabilities: [
+            'customChrome',
+            'dashboardWidgets',
+            'liveActivities',
+            'identity',
+            'deviceApps',
+          ],
+          postMessage: (message) => void send(message),
+          call: (action, payload) => send({ ...(payload || {}), action }),
+        })
+      }
+    </script>
+    <script type="module">
+      import * as native from '/pkg/index.js'
+      window.native = native
+      window.dispatchEvent(new Event('native-ready'))
+    </script>
+  </head>
+  <body></body>
+</html>

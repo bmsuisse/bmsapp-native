@@ -1,0 +1,28 @@
+[project]
+name = "bmsdna-app-native"
+version = "0.2.0"
+description = "Backend side of the BMS app: push (APNs), widgets, Live Activities, approvals and ingest routers to build into your own FastAPI backend. No database or service of its own."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.115",
+    "aioapns>=4.0",
+    "pyjwt[crypto]>=2.8",
+    "python-multipart>=0.0.9",
+]
+
+[project.urls]
+Repository = "https://github.com/bmsuisse/bmsapp-native"
+Issues = "https://github.com/bmsuisse/bmsapp-native/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bmsdna"]
+
+[tool.hatch.build.targets.sdist]
+include = ["bmsdna", "README.md"]

@@ -1,0 +1,156 @@
+name: Release
+
+# Every push to main runs the full CI, then publishes each package whose
+# version has no git tag yet. To release: bump the version in a PR and merge
+# it; the tag and the GitHub Release are created here after the publish.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report which packages would release without publishing/tagging anything'
+        type: boolean
+        default: false
+
+# Two quick merges must not race each other into publishing the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  plan:
+    name: Detect version bumps
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      npm_release: ${{ steps.npm.outputs.release }}
+      npm_version: ${{ steps.npm.outputs.version }}
+      python_release: ${{ steps.python.outputs.release }}
+      python_version: ${{ steps.python.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: npm
+        name: 'Check @bmsuisse/app-native'
+        run: |
+          VERSION=$(node -p "require('./packages/app-native/package.json').version")
+          TAG="@bmsuisse/app-native@$VERSION"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - id: python
+        name: 'Check bmsdna-app-native'
+        run: |
+          VERSION=$(grep -m1 '^version = ' python/app-native/pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          TAG="bmsdna-app-native@$VERSION"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          echo "@bmsuisse/app-native: release=${{ steps.npm.outputs.release }}    version=${{ steps.npm.outputs.version }}"
+          echo "bmsdna-app-native:    release=${{ steps.python.outputs.release }} version=${{ steps.python.outputs.version }}"
+
+  publish-npm:
+    name: 'Publish @bmsuisse/app-native'
+    needs: [test, plan]
+    if: needs.plan.outputs.npm_release == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - run: bun install --frozen-lockfile
+      - run: npm install -g npm@latest
+      # `npm publish` runs the package's `prepack` script, which builds dist/.
+      - name: Publish to npm (OIDC trusted publishing)
+        working-directory: packages/app-native
+        run: npm publish --access public --provenance
+      - name: Tag release
+        run: |
+          git tag "@bmsuisse/app-native@${{ needs.plan.outputs.npm_version }}"
+          git push origin "@bmsuisse/app-native@${{ needs.plan.outputs.npm_version }}"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.plan.outputs.npm_version }}"
+          TAG="@bmsuisse/app-native@$VERSION"
+          PREV_TAG=$(git tag -l '@bmsuisse/app-native@*' --sort=-creatordate | grep -vxF "$TAG" | head -n1)
+          {
+            echo "## @bmsuisse/app-native v$VERSION"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "Changes in \`packages/app-native\` since $PREV_TAG:"
+              echo
+              git log "$PREV_TAG..HEAD" --pretty=format:'- %s (%h)' -- packages/app-native
+            else
+              echo "Initial release."
+            fi
+          } > release-notes.md
+          gh release create "$TAG" --title "@bmsuisse/app-native v$VERSION" --notes-file release-notes.md
+
+  publish-python:
+    name: 'Publish bmsdna-app-native'
+    needs: [test, plan]
+    if: needs.plan.outputs.python_release == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - working-directory: python/app-native
+        run: uv build
+      - name: Publish to PyPI (OIDC trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/app-native/dist
+      - name: Tag release
+        run: |
+          git tag "bmsdna-app-native@${{ needs.plan.outputs.python_version }}"
+          git push origin "bmsdna-app-native@${{ needs.plan.outputs.python_version }}"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.plan.outputs.python_version }}"
+          TAG="bmsdna-app-native@$VERSION"
+          PREV_TAG=$(git tag -l 'bmsdna-app-native@*' --sort=-creatordate | grep -vxF "$TAG" | head -n1)
+          {
+            echo "## bmsdna-app-native v$VERSION"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "Changes in \`python/app-native\` since $PREV_TAG:"
+              echo
+              git log "$PREV_TAG..HEAD" --pretty=format:'- %s (%h)' -- python/app-native
+            else
+              echo "Initial release."
+            fi
+          } > release-notes.md
+          gh release create "$TAG" --title "bmsdna-app-native v$VERSION" --notes-file release-notes.md

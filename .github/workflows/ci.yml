@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  ts-check:
+    name: 'TS: typecheck + eslint + vitest + build (@bmsuisse/app-native)'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run build
+
+  python-check:
+    name: 'Python: ruff + ty + pytest (bmsdna-app-native)'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: |
+          uv sync --frozen
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run ty check
+          uv run pytest --tb=short
+
+  e2e:
+    name: 'Playwright e2e (built npm package against the Python models)'
+    needs: [ts-check, python-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: astral-sh/setup-uv@v5
+      - run: bun install --frozen-lockfile
+      - working-directory: e2e
+        run: |
+          uv sync --frozen
+          uv run playwright install --with-deps chromium
+          uv run pytest --tb=short
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-results
+          path: e2e/test-results

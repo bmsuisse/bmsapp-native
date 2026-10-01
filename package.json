@@ -1,0 +1,24 @@
+{
+  "name": "bmsapp-native",
+  "private": true,
+  "version": "0.0.0",
+  "description": "bmsapp-native — bun workspace root (not published). Packages live under packages/.",
+  "workspaces": [
+    "packages/app-native"
+  ],
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "lint": "bun run --filter '*' lint",
+    "test": "bun run --filter '*' test",
+    "check": "bun run --filter '*' check"
+  },
+  "packageManager": "bun@1.3.13",
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.3.0",
+    "globals": "17.6.0",
+    "prettier": "3.8.3",
+    "typescript-eslint": "8.59.3"
+  }
+}

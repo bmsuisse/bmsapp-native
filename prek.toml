@@ -1,0 +1,22 @@
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "check-yaml" },
+    { id = "check-json" },
+    { id = "end-of-file-fixer" },
+    { id = "trailing-whitespace" },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+    { id = "ruff", name = "ruff (lint)", language = "system", entry = "uv run ruff check", types = ["python"] },
+    { id = "ruff-format", name = "ruff (format)", language = "system", entry = "uv run ruff format --check", types = ["python"] },
+    # Whole-project graph, doesn't take meaningful per-file args -- always full run.
+    { id = "ty", name = "ty (type check)", language = "system", entry = "uv run ty check", types = ["python"], pass_filenames = false },
+    { id = "prettier", name = "prettier", language = "system", entry = "bunx --bun prettier --write", files = '\.(ts|tsx|js|jsx|css|md|json|html)$' },
+    { id = "eslint", name = "eslint", language = "system", entry = "bunx --bun eslint --fix", files = '\.(ts|tsx|js|jsx)$', exclude = '(node_modules|dist|\.tsbuildinfo)' },
+    # typecheck + lint + vitest of all npm packages (bun workspace `check` script);
+    # like ty, always over the whole repo.
+    { id = "bun-check", name = "bun run check", language = "system", entry = "bun run check", files = '\.(ts|tsx|js|jsx)$', exclude = '(node_modules|dist|\.tsbuildinfo)', pass_filenames = false },
+]

@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+*.tgz
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets — never commit
+**/.env
+**/.env.local
+**/keys/*.p8
+.npmrc.local
+
+# Editors & OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Claude artefacts
+.claude/*
+!.claude/skills/
+
+# Playwright E2E
+e2e/test-results/
+e2e/.venv/

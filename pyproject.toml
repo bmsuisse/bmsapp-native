@@ -1,0 +1,62 @@
+[project]
+name = "bmsapp-native"
+version = "0.0.0"
+description = "bmsapp-native — Python workspace root (not published)"
+requires-python = ">=3.14"
+dependencies = []
+
+[tool.uv]
+default-groups = ["dev", "test"]
+
+[tool.uv.workspace]
+members = ["python/app-native"]
+
+[tool.uv.sources]
+bmsdna-app-native = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "N", "C901"]
+ignore = ["N815"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.1a13",
+    "ruff>=0.7",
+    "granian[reload]>=2.0",
+]
+test = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "bmsdna-app-native",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "--import-mode=importlib"
+# Import directly from the source folder: macOS/iCloud marks the .pth file of the
+# editable install in ~/Documents as "hidden", and Python 3.14 then ignores it.
+pythonpath = ["python/app-native"]
+testpaths = ["python/app-native/tests"]
+
+[tool.ty.src]
+include = ["python/app-native"]
+exclude = ["**/__pycache__", "**/.venv", "**/dist", "**/build", "**/node_modules"]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI idiom `x: T = Depends(...)` / `File(...)` in router signatures.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]
+
+[tool.ruff.lint.per-file-ignores]
+# Module docstring with curl calls for copy-paste.
+"python/app-native/example/main.py" = ["E501"]

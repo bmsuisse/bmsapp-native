@@ -1,0 +1,25 @@
+[project]
+name = "e2e"
+version = "0.1.0"
+description = "Playwright E2E for bmsapp-native: the built npm package in a real browser against the Python models — deliberately outside the uv workspace so browser binaries never end up in a regular `uv sync`."
+requires-python = ">=3.14"
+dependencies = [
+    "bmsdna-app-native",
+    "playwright>=1.49",
+    "pyjwt[crypto]>=2.8",
+    "pytest>=8.3",
+    "pytest-playwright>=0.6",
+    "uvicorn>=0.30",
+    # uvicorn serves WebSockets only with such a library; the tests also use its client.
+    "websockets>=14",
+]
+
+[tool.uv.sources]
+bmsdna-app-native = { path = "../python/app-native", editable = true }
+
+[tool.pytest.ini_options]
+addopts = "--browser chromium --video retain-on-failure"
+testpaths = ["."]
+# Import the harness modules directly; also the Python package from its
+# source folder (macOS/iCloud marks the .pth file in ~/Documents as hidden).
+pythonpath = [".", "../python/app-native"]
