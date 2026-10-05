@@ -143,10 +143,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - working-directory: python/app-native
         run: uv build
+      # The package is a uv workspace member, so `uv build` writes to the workspace root dist/.
       - name: Publish to PyPI (OIDC trusted publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: python/app-native/dist
+          packages-dir: dist
       - name: Tag release
         env:
           VERSION: ${{ needs.plan.outputs.python_version }}
