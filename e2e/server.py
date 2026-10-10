@@ -65,6 +65,7 @@ from bmsdna.app_native import (
     NativeForm,
     ReceivedDocument,
     SignedSessionCookie,
+    SurfaceLimitError,
     Widget,
     WidgetOptionsRequest,
     WidgetRequestContext,
@@ -185,11 +186,15 @@ def _device_action(action: str, body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "message": f"{action} ausgeführt."}
 
 
-def _invalid_message(error: ValidationError) -> str:
-    # Like the app: name the field path of the first problem.
-    first = error.errors()[0]
-    path = ".".join(str(part) for part in first["loc"])
-    return f"{path}: {first['msg']}" if path else first["msg"]
+def _refusal(error: ValidationError) -> tuple[str, str]:
+    """Like the app: a definition beyond a limit is `tooLarge`, anything else
+    that does not parse is `invalid`; the message names the field path."""
+    problems = error.errors()
+    limits = [p for p in problems if isinstance(p.get("ctx", {}).get("error"), SurfaceLimitError)]
+    problem = (limits or problems)[0]
+    path = ".".join(str(part) for part in problem["loc"])
+    message = f"{path}: {problem['msg']}" if path else problem["msg"]
+    return ("tooLarge" if limits else "invalid"), message
 
 
 def _surface(action: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -200,7 +205,8 @@ def _surface(action: str, body: dict[str, Any]) -> dict[str, Any]:
     try:
         model.model_validate(definition)
     except ValidationError as error:
-        return {"ok": False, "error": "invalid", "message": _invalid_message(error)}
+        code, message = _refusal(error)
+        return {"ok": False, "error": code, "message": message}
     return {"ok": True}
 
 

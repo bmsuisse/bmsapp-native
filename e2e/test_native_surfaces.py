@@ -681,10 +681,10 @@ def test_limit_warnings_reach_the_console_and_the_call_goes_through(page: Page) 
         })"""
     )
 
-    # The harness (like the app) refuses the oversized definition; the page was
-    # warned first, before the call.
+    # The harness (like the app) refuses the oversized definition as `tooLarge`;
+    # the page was warned first, before the call.
     assert result["ok"] is False
-    assert result["error"] == "invalid"
+    assert result["error"] == "tooLarge"
     assert any("[@bmsuisse/app-native] showForm: 61 fields" in w for w in warnings)
 
 
@@ -774,3 +774,76 @@ def test_a_chained_surface_with_its_own_round_trip_is_answered_by_id(page: Page)
     assert _results(page) == [
         {"action": "surfaceResult", "id": "reject-reason", "ok": True, "message": "Rejected"}
     ]
+
+
+def test_repeat_fields_are_invalid_and_a_long_then_is_too_large(page: Page) -> None:
+    _open(page)
+    result = page.evaluate(
+        """async () => {
+          const group = (count) => ({
+            id: 'lines',
+            type: 'repeat',
+            fields: Array.from({ length: count }, (_, i) => ({ id: 'f' + i })),
+          })
+          const steps = (count) => Array.from({ length: count }, (_, i) => ({ copy: String(i) }))
+          const showSteps = (count) => window.native.showContent({
+            blocks: [{ type: 'divider' }],
+            actions: [{ id: 'go', label: 'Go', then: steps(count) }],
+          })
+          return {
+            noFields: await window.native.showForm({
+              fields: [{ id: 'lines', type: 'repeat', fields: [] }],
+            }),
+            elevenFields: await window.native.showForm({ fields: [group(11)] }),
+            tenFields: await window.native.showForm({ fields: [group(10)] }),
+            sevenSteps: await showSteps(7),
+            sixSteps: await showSteps(6),
+          }
+        }"""
+    )
+
+    # 1 to 10 fields in a group: anything else is `invalid` (the app, not `tooLarge`).
+    for name in ("noFields", "elevenFields"):
+        assert result[name]["ok"] is False
+        assert result[name]["error"] == "invalid"
+        assert "1 to 10" in result[name]["message"]
+    # More than 6 steps in a `then`: `tooLarge`.
+    assert result["sevenSteps"]["error"] == "tooLarge"
+    assert "at most 6" in result["sevenSteps"]["message"]
+    # At the limits the definitions are accepted (and dismissed by the user here).
+    assert result["tenFields"] == {"ok": False, "error": "cancelled"}
+    assert result["sixSteps"]["ok"] is True
+
+
+def test_an_answer_with_too_many_then_steps_is_refused_and_the_surface_stays_open(
+    page: Page,
+) -> None:
+    _open(page)
+    _script(page, {"submit": [{"values": {"name": "Miller Ltd"}}]})
+
+    result = page.evaluate(
+        """async () => {
+          const pending = window.native.showForm(
+            { id: 'new-customer', fields: [{ id: 'name' }] },
+            // Seven steps: the page's answer is refused by the app.
+            {
+              onSubmit: () => ({
+                then: Array.from({ length: 7 }, (_, i) => ({ copy: String(i) })),
+              }),
+            }
+          )
+          while (window.__surfaces.refused.length === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 10))
+          }
+          const stillOpen = window.__surfaces.open
+          const closed = await window.native.closeSurface({ id: 'new-customer' })
+          return { refused: window.__surfaces.refused, stillOpen, closed, result: await pending }
+        }"""
+    )
+
+    assert result["refused"][0]["error"] == "tooLarge"
+    assert result["stillOpen"] == "new-customer"  # the user would still see the spinner
+    assert result["closed"] == {"ok": True}
+    assert result["result"] == {"ok": False, "error": "cancelled"}
+    [answer] = _results(page)
+    assert answer["ok"] is True and len(answer["then"]) == 7

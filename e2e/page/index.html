@@ -58,6 +58,7 @@
           events: [], // what the page was called with (onNativeSurfaceAction)
           lookups: [], // answers of the option lookups
           steps: [], // `then` steps the app ran itself (openPath, copy, …)
+          refused: [], // answers of the page that the app refused (surfaceResult)
         }
         window.__surfaces = surfaces
 
@@ -266,6 +267,13 @@
             const waiting = surfaces.waiting
             if (!waiting || waiting.id !== (payload || {}).id) {
               return failure('invalid', 'No surface is waiting for an answer.')
+            }
+            // Like the app: the `then` of an accepted answer is read, and more than
+            // 6 steps are refused. The surface keeps waiting for a proper answer.
+            if (payload.ok === true && Array.isArray(payload.then) && payload.then.length > 6) {
+              const refusal = failure('tooLarge', 'then can have at most 6 steps.')
+              surfaces.refused.push(refusal)
+              return refusal
             }
             surfaces.waiting = null
             waiting.resolve(payload)
