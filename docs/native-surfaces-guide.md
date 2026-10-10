@@ -91,6 +91,26 @@ own origin**: an iframe or a foreign page that ended up in the web view answers
 
 On iPad the sheets appear as the usual centered form sheets.
 
+## How the app draws it
+
+A few rules that are not visible in the definition:
+
+- **`image`** is always as wide as the content. With `fit` (the default) the
+  picture keeps its proportions and `height` is a **maximum**: a picture that
+  is taller is cropped at the top and bottom, centered; it is not shrunk with
+  margins at the sides. With `fill` the image is exactly `height` tall (default 200) and cropped to fill. `shape` `rounded` (the default) cuts the corners
+  (12 pt) from the picture itself, `circle` makes it round, `none` leaves it
+  rectangular.
+- **`card`:** a card that holds only `heading`, `text`, `divider` or `spacer`
+  blocks (also a card in a card, as long as it holds only those) is drawn as
+  plain text, without the gray box. A card with `facts`, `list`, `table`,
+  `kpi`, `fields`, `buttons`, `image`, `map`, … keeps its box.
+- **Form text** (`text` of the form and of a page) is plain text above the
+  fields, not a box.
+- **`tint`** colors the content (icons, badges, the primary action). The
+  Close / Cancel buttons of the navigation bar are in the app's own color; a
+  page cannot change them.
+
 ## `showForm`
 
 ```ts
@@ -149,7 +169,7 @@ if (result.ok) {
 | `id`      | `string`                                          | Echoed in results and events; used by `closeSurface`, `surfaceResult` and as `form_id` towards your backend. The app generates one if missing.                                                                              |
 | `title`   | `string`                                          | Title in the navigation bar.                                                                                                                                                                                                |
 | `size`    | `full` `large` `medium` `fit`                     | Default `large`.                                                                                                                                                                                                            |
-| `tint`    | `#rrggbb`                                         | Accent color of the surface.                                                                                                                                                                                                |
+| `tint`    | `#rrggbb`                                         | Accent color of the **content**: icons, badges, the primary action. The Close / Cancel buttons of the navigation bar stay in the app's own color.                                                                           |
 | `context` | `object`                                          | Opaque to the app: echoed in results and sent along with option lookups and uploads (`context` there).                                                                                                                      |
 | `text`    | `string`                                          | Intro text on the first page.                                                                                                                                                                                               |
 | `values`  | `object`                                          | Prefill by field id.                                                                                                                                                                                                        |
@@ -168,29 +188,29 @@ The fields are the same as in the forms of
 An older app shows a type it does not know as `text`: see
 [Old app versions](#fallback-browsers-and-old-app-versions).
 
-| `type`        | Shows                                                                                                                                                                                                                            | In the result `values`                          |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `text`        | Single-line text (the default type)                                                                                                                                                                                              | `string`                                        |
-| `number`      | Number                                                                                                                                                                                                                           | `number`                                        |
-| `select`      | One of `options`; with `remote: true` loaded from your backend                                                                                                                                                                   | `string` (the option `value`), text in `labels` |
-| `toggle`      | Switch                                                                                                                                                                                                                           | `boolean`                                       |
-| `date`        | Date                                                                                                                                                                                                                             | `string` `yyyy-MM-dd`                           |
-| `search`      | Search field; results come from your backend (`minQueryLength`, default 2)                                                                                                                                                       | `string` (the option `value`), text in `labels` |
-| `textarea`    | Multi-line text; `maxLength` shows a counter                                                                                                                                                                                     | `string`                                        |
-| `email`       | Text with the email keyboard and a format check                                                                                                                                                                                  | `string`                                        |
-| `phone`       | Text with the phone keyboard                                                                                                                                                                                                     | `string`                                        |
-| `url`         | Text with the URL keyboard and a format check                                                                                                                                                                                    | `string`                                        |
-| `multiselect` | Choose any number of `options`                                                                                                                                                                                                   | `string[]`                                      |
-| `segmented`   | A few `options` as a segmented control                                                                                                                                                                                           | `string`                                        |
-| `stepper`     | Whole number with + and −: `min`, `max`, `step`                                                                                                                                                                                  | `number`                                        |
-| `time`        | Time of day                                                                                                                                                                                                                      | `string` `HH:mm`                                |
-| `datetime`    | Date and time, device local, no time zone                                                                                                                                                                                        | `string` `yyyy-MM-ddTHH:mm`                     |
-| `info`        | Read-only row (`label`, `value`)                                                                                                                                                                                                 | not part of the result                          |
-| `photo`       | Camera and/or library. `max` 1–10 (default 5), `source` `camera` / `library` / `both`, `maxDimension` 256–4096 (default 2048)                                                                                                    | `NativeFileRef[]`                               |
-| `scan`        | Document scanner. `format` `jpeg` (default, one file per page) or `pdf` (one file), `max` pages 1–20 (default 10)                                                                                                                | `NativeFileRef[]`                               |
-| `signature`   | Drawn with finger or pencil, PNG                                                                                                                                                                                                 | `NativeFileRef[]` (one)                         |
-| `barcode`     | Text field with a button that scans a barcode/QR code; `symbologies` restricts the scanner to some of `aztec`, `codabar`, `code39`, `code93`, `code128`, `dataMatrix`, `ean8`, `ean13`, `i2of5`, `itf14`, `pdf417`, `qr`, `upce` | `string`                                        |
-| `repeat`      | Repeating group (order lines): `fields`, `min`, `max` (at most 50), `addLabel`. Inside only `text`, `number`, `select`, `toggle`, `date`, `textarea`, `stepper`; no nesting, and no `visibleIf` inside the group                 | array of objects, one per row                   |
+| `type`        | Shows                                                                                                                                                                                                                                                                         | In the result `values`                          |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `text`        | Single-line text (the default type)                                                                                                                                                                                                                                           | `string`                                        |
+| `number`      | Number                                                                                                                                                                                                                                                                        | `number`                                        |
+| `select`      | One of `options`; with `remote: true` loaded from your backend                                                                                                                                                                                                                | `string` (the option `value`), text in `labels` |
+| `toggle`      | Switch                                                                                                                                                                                                                                                                        | `boolean`                                       |
+| `date`        | Date                                                                                                                                                                                                                                                                          | `string` `yyyy-MM-dd`                           |
+| `search`      | Search field; results come from your backend (`minQueryLength`, default 2)                                                                                                                                                                                                    | `string` (the option `value`), text in `labels` |
+| `textarea`    | Multi-line text; `maxLength` shows a counter                                                                                                                                                                                                                                  | `string`                                        |
+| `email`       | Text with the email keyboard and a format check                                                                                                                                                                                                                               | `string`                                        |
+| `phone`       | Text with the phone keyboard                                                                                                                                                                                                                                                  | `string`                                        |
+| `url`         | Text with the URL keyboard and a format check                                                                                                                                                                                                                                 | `string`                                        |
+| `multiselect` | Choose any number of `options`                                                                                                                                                                                                                                                | `string[]`                                      |
+| `segmented`   | A few `options` as a segmented control                                                                                                                                                                                                                                        | `string`                                        |
+| `stepper`     | Whole number with + and −: `min`, `max`, `step`                                                                                                                                                                                                                               | `number`                                        |
+| `time`        | Time of day                                                                                                                                                                                                                                                                   | `string` `HH:mm`                                |
+| `datetime`    | Date and time, device local, no time zone                                                                                                                                                                                                                                     | `string` `yyyy-MM-ddTHH:mm`                     |
+| `info`        | Read-only row (`label`, `value`)                                                                                                                                                                                                                                              | not part of the result                          |
+| `photo`       | Camera and/or library. `max` 1–10 (default 5), `source` `camera` / `library` / `both`, `maxDimension` 256–4096 (default 2048)                                                                                                                                                 | `NativeFileRef[]`                               |
+| `scan`        | Document scanner. `format` `jpeg` (default, one file per page) or `pdf` (one file), `max` pages 1–20 (default 10)                                                                                                                                                             | `NativeFileRef[]`                               |
+| `signature`   | Drawn with finger or pencil, PNG                                                                                                                                                                                                                                              | `NativeFileRef[]` (one)                         |
+| `barcode`     | Text field with a button that scans a barcode/QR code; `symbologies` restricts the scanner to some of `aztec`, `codabar`, `code39`, `code93`, `code128`, `dataMatrix`, `ean8`, `ean13`, `i2of5`, `itf14`, `pdf417`, `qr`, `upce`                                              | `string`                                        |
+| `repeat`      | Repeating group (order lines): `fields` (1–10 per row), `min`, `max` (at most 50 rows), `addLabel`. Inside only `text`, `number`, `select`, `toggle`, `date`, `textarea`, `stepper`; no nesting, no `visibleIf` inside the group, and a `select` there needs inline `options` | array of objects, one per row                   |
 
 There is deliberately **no password or secret field**: forms are not for
 signing in.
@@ -375,7 +395,7 @@ Actions are the footer `actions`, the items of a `buttons` block and the
 | `biometric`   | Face ID first. UX only, **not** proof for your backend                                                         |
 | `submit`      | `true`: validate the `fields` blocks first and return their `values` in the result                             |
 | `wait`        | `true`: round trip, the surface stays open until the page answers ([below](#round-trip-onsubmit-and-onaction)) |
-| `then`        | Steps that run in the app, in order, before the call resolves                                                  |
+| `then`        | Steps that run in the app, in order, before the call resolves. At most 6 per list (`tooLarge`)                 |
 
 Tapping an action ends the surface and resolves the promise with its `id`,
 unless it has `wait`. The user dismissing the sheet resolves with
@@ -467,13 +487,13 @@ const result = await showForm(customerForm, {
 })
 ```
 
-| The handler …                                | The app gets                                                                                                                                                          |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| returns nothing                              | `ok: true`: the surface closes                                                                                                                                        |
-| returns `{ then: […] }` and/or `{ message }` | `ok: true` with those: runs `then` (for example a "created" card), then closes                                                                                        |
-| returns `{ fieldErrors: { field: 'text' } }` | `ok: false`: marks the fields and jumps to the first page that has an error                                                                                           |
-| returns `{ ok: false, message }`             | `ok: false`: stays open with the message                                                                                                                              |
-| throws an `Error`                            | `ok: false` with `message` set to the error's message — **shown to the user**, so throw readable messages. An error that carries `fieldErrors` marks those fields too |
+| The handler …                                | The app gets                                                                                                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| returns nothing                              | `ok: true`: the surface closes                                                                                                                                           |
+| returns `{ then: […] }` and/or `{ message }` | `ok: true` with those: runs `then` (for example a "created" card), then closes. At most 6 steps: the app answers a longer one with `tooLarge` and keeps the surface open |
+| returns `{ fieldErrors: { field: 'text' } }` | `ok: false`: marks the fields and jumps to the first page that has an error                                                                                              |
+| returns `{ ok: false, message }`             | `ok: false`: stays open with the message                                                                                                                                 |
+| throws an `Error`                            | `ok: false` with `message` set to the error's message — **shown to the user**, so throw readable messages. An error that carries `fieldErrors` marks those fields too    |
 
 `onSubmit(values, event)` gets the submitted `values` and the event
 `{ id, action, values?, labels?, context? }` (`labels` are the shown texts of
@@ -860,25 +880,33 @@ console before the call (`formLimitWarnings(def)` and
 `contentLimitWarnings(def)` return the same messages, and
 `NATIVE_SURFACE_LIMITS` holds the numbers):
 
-| What                                                    | Limit                          |
-| ------------------------------------------------------- | ------------------------------ |
-| The whole definition                                    | 256 KB as JSON                 |
-| Form pages                                              | 10                             |
-| Form fields (all pages; a `repeat` group counts as one) | 60                             |
-| Inline `options` of one field                           | 200 (use `search` or `remote`) |
-| Rows of a `repeat` group                                | 50                             |
-| Content blocks (nested ones included)                   | 100                            |
-| Levels of nested blocks (top level = 1)                 | 3                              |
-| Footer actions                                          | 4                              |
-| Buttons in one `buttons` block                          | 6                              |
-| Table columns / rows                                    | 20 / 200                       |
-| Fields in all `fields` blocks of one screen             | 60                             |
-| Pages of a `scan` field                                 | 20                             |
-| Inline image (`data:`)                                  | 1 MB each, 4 MB in total       |
-| Chained surfaces after the first one                    | 4 (5 screens in a flow)        |
-| One uploaded media file (after downscaling)             | 25 MB                          |
-| All media of one form                                   | 100 MB                         |
-| Time to answer a round trip                             | 60 seconds                     |
+| What                                                                               | Limit                          |
+| ---------------------------------------------------------------------------------- | ------------------------------ |
+| The whole definition                                                               | 256 KB as JSON                 |
+| Form pages                                                                         | 10                             |
+| Form fields (all pages; a `repeat` group counts as one)                            | 60                             |
+| Inline `options` of one field                                                      | 200 (use `search` or `remote`) |
+| Rows of a `repeat` group                                                           | 50                             |
+| Fields in one `repeat` group                                                       | 1 to 10 (`invalid` otherwise)  |
+| Content blocks (nested ones included)                                              | 100                            |
+| Levels of nested blocks (top level = 1)                                            | 3                              |
+| Footer actions                                                                     | 4                              |
+| Steps in one `then` list (an action's, the one a page answers with, a chained one) | 6 (`tooLarge`)                 |
+| Buttons in one `buttons` block                                                     | 6                              |
+| Table columns / rows                                                               | 20 / 200                       |
+| Fields in all `fields` blocks of one screen                                        | 60                             |
+| Pages of a `scan` field                                                            | 20                             |
+| Inline image (`data:`)                                                             | 1 MB each, 4 MB in total       |
+| Chained surfaces after the first one                                               | 4 (5 screens in a flow)        |
+| One uploaded media file (after downscaling)                                        | 25 MB                          |
+| All media of one form                                                              | 100 MB                         |
+| Time to answer a round trip                                                        | 60 seconds                     |
+
+The chain depth is the exception: the app checks it only when it reaches the
+step. A chained surface beyond the fifth screen is not opened (the app shows
+"This could not be opened.") and the flow ends with the result of the screen
+before it, instead of an error at the call. The models and the development
+warnings tell you earlier.
 
 The Python models go further and reject what the app would answer `invalid`
 for, so a backend catches it before the device does:
@@ -888,13 +916,20 @@ for, so a backend catches it before the device does:
   one block.
 - A `select` has `options`, or `remote: true`, in a native form.
 - A `photo` has `max_dimension` 256–4096, a `scan` `max` 1–20.
-- A `repeat` group has no `visible_if` inside.
+- A `repeat` group has 1 to 10 fields and no `visible_if` inside.
+- A `then` list has at most 6 steps (also in chained definitions).
 - An image `url`, `file`/`video` URL and list `image` is `https`, and
   `open_url` is `https`, `tel` or `mailto`; `tint` is `#rrggbb`.
 
+A definition beyond a limit raises `SurfaceLimitError` (a `ValueError`, reported
+by Pydantic as a `ValidationError`; the exception is `error["ctx"]["error"]`
+of the entry in `errors()`): that is `tooLarge` for the app. Everything else
+that does not parse is `invalid`.
+
 The npm package's development warnings cover the **limits** above (and the
-ranges of `photo.maxDimension` and `scan.max`), not these structural rules: the
-app tells you with `invalid` and a field path.
+ranges of `photo.maxDimension` and `scan.max`, the number of fields in a
+`repeat` group, and the `then` a handler returns), not the other structural rules:
+the app tells you with `invalid` and a field path.
 
 Warnings are logged by `showForm` and `showContent` unless `NODE_ENV` is
 `production` (or Vite's `import.meta.env.PROD` is set). Pass

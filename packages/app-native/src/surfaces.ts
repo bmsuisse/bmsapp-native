@@ -321,6 +321,8 @@ export const NATIVE_SURFACE_LIMITS = {
   /** Inline `options` per field. */
   fieldOptions: 200,
   repeatRows: 50,
+  /** Fields in one `repeat` group, 1 to this many (the app answers `invalid` beyond). */
+  repeatFields: 10,
   /** `photo.max`. */
   photoMax: 10,
   /** `photo.maxDimension`, from and up to. */
@@ -338,6 +340,8 @@ export const NATIVE_SURFACE_LIMITS = {
   tableColumns: 20,
   tableRows: 200,
   footerActions: 4,
+  /** Steps in one `then` list (the app answers `tooLarge` beyond). */
+  thenSteps: 6,
   /** One inline `data:` image, in bytes. */
   inlineImageBytes: 1024 * 1024,
   inlineImagesTotalBytes: 4 * 1024 * 1024,
@@ -415,6 +419,11 @@ function fieldWarnings(fields: NativeFormField[], where: string): string[] {
       if (field.max !== undefined && field.max > NATIVE_SURFACE_LIMITS.repeatRows) {
         warnings.push(
           `${at}: repeat max ${field.max} is above ${NATIVE_SURFACE_LIMITS.repeatRows} rows.`
+        )
+      }
+      if (field.fields.length < 1 || field.fields.length > NATIVE_SURFACE_LIMITS.repeatFields) {
+        warnings.push(
+          `${at}: a repeat group has ${field.fields.length} fields, the app takes 1 to ${NATIVE_SURFACE_LIMITS.repeatFields}.`
         )
       }
       if (field.fields.some((inner) => (inner.type as string) === 'repeat')) {
@@ -514,6 +523,56 @@ function walkBlocks(blocks: NativeContentBlock[], depth: number, where: string, 
   })
 }
 
+/** One `then` list: at most 6 steps, and the chained content inside it as well. */
+function stepsWarnings(steps: NativeThen[], where: string): string[] {
+  const warnings: string[] = []
+  if (steps.length > NATIVE_SURFACE_LIMITS.thenSteps) {
+    warnings.push(
+      `${where}: ${steps.length} \`then\` steps, the app takes at most ${NATIVE_SURFACE_LIMITS.thenSteps}.`
+    )
+  }
+  steps.forEach((step, index) => {
+    if ('showContent' in step) {
+      warnings.push(...thenWarnings(step.showContent, `${where}[${index}].showContent`))
+    }
+  })
+  return warnings
+}
+
+function actionWarnings(action: NativeAction, where: string): string[] {
+  return stepsWarnings(action.then ?? [], `${where} (${action.id}).then`)
+}
+
+function blockActionWarnings(blocks: NativeContentBlock[], where: string): string[] {
+  const warnings: string[] = []
+  blocks.forEach((block, index) => {
+    const at = `${where}[${index}]`
+    if (block.type === 'buttons') {
+      block.items.forEach((item, i) => warnings.push(...actionWarnings(item, `${at}.items[${i}]`)))
+    }
+    if (block.type === 'list') {
+      block.items.forEach((item, i) => {
+        if (item.action) warnings.push(...actionWarnings(item.action, `${at}.items[${i}].action`))
+      })
+    }
+    if (block.type === 'card' || block.type === 'row') {
+      warnings.push(...blockActionWarnings(block.blocks, `${at}.blocks`))
+    }
+  })
+  return warnings
+}
+
+/** The `then` lists of all actions of a content definition, and of the content chained to them. */
+function thenWarnings(def: NativeContentDef, where: string): string[] {
+  const prefix = where ? `${where}.` : ''
+  return [
+    ...(def.actions ?? []).flatMap((action, index) =>
+      actionWarnings(action, `${prefix}actions[${index}]`)
+    ),
+    ...blockActionWarnings(def.blocks, `${prefix}blocks`),
+  ]
+}
+
 /** Steps of the longest chain of `showForm`/`showContent` in `then`. */
 function chainDepth(actions: NativeAction[]): number {
   let deepest = 0
@@ -583,6 +642,7 @@ export function contentLimitWarnings(def: NativeContentDef): string[] {
       `${def.actions?.length} footer actions, the app takes at most ${limits.footerActions}.`
     )
   }
+  walk.warnings.push(...thenWarnings(def, ''))
   const chain = chainDepth(contentActions(def))
   if (chain > limits.chainDepth) {
     walk.warnings.push(
@@ -647,6 +707,7 @@ export type SurfaceHandlerResult =
       ok?: boolean
       message?: string
       fieldErrors?: Record<string, string>
+      /** At most 6 steps: the app refuses more with `tooLarge`. */
       then?: NativeThen[]
     }
 
@@ -682,6 +743,8 @@ export type ShowContentOptions = {
 
 type HandlerEntry = {
   handle: SurfaceActionHandler
+  /** Warn about a `then` the app would refuse (development builds by default). */
+  validate: boolean
   /** Counts the actions that arrived; an answer to an older one is dropped. */
   seen: number
 }
@@ -736,6 +799,9 @@ async function dispatch(event: NativeSurfaceActionEvent): Promise<void> {
   // The surface is gone or the user triggered the action again after the
   // app's timeout: a late answer would close or mark the wrong attempt.
   if (handlers.get(event.id) !== entry || entry.seen !== mine) return
+  // The app refuses a `then` of more than 6 steps with `tooLarge` and keeps
+  // waiting for an answer, so the user would watch the spinner until the timeout.
+  if (entry.validate && answer.then) warn('surfaceResult', stepsWarnings(answer.then, 'then'))
   await surfaceResult({ id: event.id, ...answer })
 }
 
@@ -756,7 +822,8 @@ function newSurfaceId(): string {
 async function open<R extends NativeSurfaceResult>(
   action: 'showForm' | 'showContent',
   payload: NativeFormDef | NativeContentDef,
-  handler?: SurfaceActionHandler
+  handler?: SurfaceActionHandler,
+  validate = false
 ): Promise<R> {
   if (typeof window === 'undefined' || !window.BMSNative) {
     return { ok: false, error: 'unavailable' } as R
@@ -770,7 +837,7 @@ async function open<R extends NativeSurfaceResult>(
       message: `A surface with the id "${id}" is already open.`,
     } as R
   }
-  const unregister = register(id, handler)
+  const unregister = register(id, handler, validate)
   try {
     return (await call(action, payload)) as unknown as R
   } finally {
@@ -779,8 +846,8 @@ async function open<R extends NativeSurfaceResult>(
 }
 
 /** Puts a handler into the registry; the returned function removes exactly this one. */
-function register(id: string, handle: SurfaceActionHandler): () => void {
-  const entry: HandlerEntry = { handle, seen: 0 }
+function register(id: string, handle: SurfaceActionHandler, validate: boolean): () => void {
+  const entry: HandlerEntry = { handle, validate, seen: 0 }
   handlers.set(id, entry)
   listen()
   return () => {
@@ -813,7 +880,8 @@ export function showForm(
   def: NativeFormDef,
   options: ShowFormOptions = {}
 ): Promise<NativeFormResult> {
-  if (options.validate ?? isDevelopment()) warn('showForm', formLimitWarnings(def))
+  const validate = options.validate ?? isDevelopment()
+  if (validate) warn('showForm', formLimitWarnings(def))
   const { onSubmit } = options
   if (!onSubmit) return open<NativeFormResult>('showForm', def)
   const payload: NativeFormDef = {
@@ -821,7 +889,12 @@ export function showForm(
     id: def.id ?? newSurfaceId(),
     submit: { ...def.submit, wait: true },
   }
-  return open<NativeFormResult>('showForm', payload, (event) => onSubmit(event.values ?? {}, event))
+  return open<NativeFormResult>(
+    'showForm',
+    payload,
+    (event) => onSubmit(event.values ?? {}, event),
+    validate
+  )
 }
 
 function withWait(action: NativeAction): NativeAction {
@@ -862,7 +935,8 @@ export function showContent(
   def: NativeContentDef,
   options: ShowContentOptions = {}
 ): Promise<NativeContentResult> {
-  if (options.validate ?? isDevelopment()) warn('showContent', contentLimitWarnings(def))
+  const validate = options.validate ?? isDevelopment()
+  if (validate) warn('showContent', contentLimitWarnings(def))
   const { onAction } = options
   if (!onAction) return open<NativeContentResult>('showContent', def)
   const payload: NativeContentDef = {
@@ -871,7 +945,7 @@ export function showContent(
     blocks: withWaitInBlocks(def.blocks),
     ...(def.actions && { actions: def.actions.map(withWait) }),
   }
-  return open<NativeContentResult>('showContent', payload, onAction)
+  return open<NativeContentResult>('showContent', payload, onAction, validate)
 }
 
 /**
@@ -909,7 +983,7 @@ export function showContent(
  */
 export function onSurfaceAction(id: string, handler: SurfaceActionHandler): () => void {
   if (typeof window === 'undefined' || !window.BMSNative) return () => {}
-  return register(id, handler)
+  return register(id, handler, isDevelopment())
 }
 
 /**

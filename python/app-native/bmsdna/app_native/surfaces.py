@@ -40,6 +40,7 @@ from .widgets import (
     KpiData,
     ProgressData,
     StatsData,
+    SurfaceLimitError,
     Value,
     _CamelModel,
     check_form_fields,
@@ -60,6 +61,9 @@ MAX_CONTENT_BLOCKS = 100
 MAX_BLOCK_NESTING = 3
 #: Buttons in the footer of a content definition.
 MAX_FOOTER_ACTIONS = 4
+#: Steps of one `then` list: an action's `then`, the `then` a page answers with
+#: and a chained step list.
+MAX_THEN_STEPS = 6
 #: Items of one `buttons` block.
 MAX_BUTTONS_PER_BLOCK = 6
 #: Columns and rows of one `table` block.
@@ -108,7 +112,7 @@ def _json_bytes(model: _CamelModel) -> int:
 def _check_definition_size(model: _CamelModel) -> None:
     size = _json_bytes(model)
     if size > MAX_SURFACE_DEFINITION_BYTES:
-        raise ValueError(
+        raise SurfaceLimitError(
             f"The definition is {size} bytes as JSON, the app takes at most "
             f"{MAX_SURFACE_DEFINITION_BYTES}."
         )
@@ -166,16 +170,16 @@ def _form_fields(form: NativeForm) -> list[ActionField]:
 def _check_form_limits(form: NativeForm) -> None:
     pages = form.pages or []
     if len(pages) > MAX_FORM_PAGES:
-        raise ValueError(f"{len(pages)} pages, the app takes at most {MAX_FORM_PAGES}.")
+        raise SurfaceLimitError(f"{len(pages)} pages, the app takes at most {MAX_FORM_PAGES}.")
     fields = _form_fields(form)
     if len(fields) > MAX_FORM_FIELDS:
-        raise ValueError(f"{len(fields)} fields, the app takes at most {MAX_FORM_FIELDS}.")
+        raise SurfaceLimitError(f"{len(fields)} fields, the app takes at most {MAX_FORM_FIELDS}.")
     for field in fields:
         _check_field_limits(field)
         _check_select_options(field)
         rows = (form.values or {}).get(field.id)
         if field.type == "repeat" and isinstance(rows, list) and len(rows) > MAX_REPEAT_ROWS:
-            raise ValueError(
+            raise SurfaceLimitError(
                 f"`values.{field.id}` has {len(rows)} rows, the app takes at most "
                 f"{MAX_REPEAT_ROWS}."
             )
@@ -193,7 +197,7 @@ def _check_select_options(field: ActionField) -> None:
 
 def _check_field_limits(field: ActionField) -> None:
     if field.options and len(field.options) > MAX_FIELD_OPTIONS:
-        raise ValueError(
+        raise SurfaceLimitError(
             f"`{field.id}` has {len(field.options)} options, the app takes at most "
             f"{MAX_FIELD_OPTIONS} inline. Use a search field or `remote=True`."
         )
@@ -223,8 +227,17 @@ class NativeAction(_CamelModel):
     #: Round trip: keep the surface open until the page answers with
     #: `surfaceResult`.
     wait: bool | None = None
-    #: Steps that run in the app before the call resolves.
+    #: Steps that run in the app before the call resolves. At most 6.
     then: list[NativeThen] | None = None
+
+    @model_validator(mode="after")
+    def _then_steps(self) -> NativeAction:
+        if self.then is not None and len(self.then) > MAX_THEN_STEPS:
+            raise SurfaceLimitError(
+                f"`{self.id}`: {len(self.then)} `then` steps, the app takes at most "
+                f"{MAX_THEN_STEPS}."
+            )
+        return self
 
 
 class _Step(_CamelModel):
@@ -401,7 +414,7 @@ class ImageBlock(_CamelModel):
                 raise ValueError("`data` of an `image` block must be a `data:image/...` URI.")
             size = _decoded_data_uri_bytes(self.data)
             if size > MAX_INLINE_IMAGE_BYTES:
-                raise ValueError(
+                raise SurfaceLimitError(
                     f"An inline image is {size} bytes, the app takes at most "
                     f"{MAX_INLINE_IMAGE_BYTES}. Use `url`."
                 )
@@ -420,13 +433,23 @@ class ListBlock(_CamelModel):
 
 class TableBlock(_CamelModel):
     type: Literal["table"] = "table"
-    columns: list[NativeTableColumn] = Field(min_length=1, max_length=MAX_TABLE_COLUMNS)
+    #: 1 to 20 columns.
+    columns: list[NativeTableColumn] = Field(min_length=1)
     #: One object per row, keyed by the column `key`. At most 200.
-    rows: list[dict[str, str | int | float]] = Field(max_length=MAX_TABLE_ROWS)
+    rows: list[dict[str, str | int | float]]
     caption: str | None = None
 
     @model_validator(mode="after")
     def _unique_keys(self) -> TableBlock:
+        if len(self.columns) > MAX_TABLE_COLUMNS:
+            raise SurfaceLimitError(
+                f"A `table` has {len(self.columns)} columns, the app takes at most "
+                f"{MAX_TABLE_COLUMNS}."
+            )
+        if len(self.rows) > MAX_TABLE_ROWS:
+            raise SurfaceLimitError(
+                f"A `table` has {len(self.rows)} rows, the app takes at most {MAX_TABLE_ROWS}."
+            )
         keys = [c.key for c in self.columns]
         if len(keys) != len(set(keys)):
             raise ValueError("The column `key`s of a `table` must be unique.")
@@ -484,7 +507,16 @@ class BadgesBlock(_CamelModel):
 class ButtonsBlock(_CamelModel):
     type: Literal["buttons"] = "buttons"
     #: One to six actions in a row.
-    items: list[NativeAction] = Field(min_length=1, max_length=MAX_BUTTONS_PER_BLOCK)
+    items: list[NativeAction] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _at_most_six(self) -> ButtonsBlock:
+        if len(self.items) > MAX_BUTTONS_PER_BLOCK:
+            raise SurfaceLimitError(
+                f"A `buttons` block has {len(self.items)} items, the app takes at most "
+                f"{MAX_BUTTONS_PER_BLOCK}."
+            )
+        return self
 
 
 class KpiBlock(_CamelModel):
@@ -611,22 +643,24 @@ def _chain_depth(content: NativeContent) -> int:
 def _check_content_limits(content: NativeContent) -> None:
     blocks = list(_iter_blocks(content.blocks))
     if len(blocks) > MAX_CONTENT_BLOCKS:
-        raise ValueError(f"{len(blocks)} blocks, the app takes at most {MAX_CONTENT_BLOCKS}.")
+        raise SurfaceLimitError(
+            f"{len(blocks)} blocks, the app takes at most {MAX_CONTENT_BLOCKS}."
+        )
     deepest = max((depth for _, depth in blocks), default=0)
     if deepest > MAX_BLOCK_NESTING:
-        raise ValueError(
+        raise SurfaceLimitError(
             f"Blocks are nested {deepest} levels deep, the app takes at most "
             f"{MAX_BLOCK_NESTING} (the top level counts as 1)."
         )
     if len(content.actions or []) > MAX_FOOTER_ACTIONS:
-        raise ValueError(
+        raise SurfaceLimitError(
             f"{len(content.actions or [])} footer actions, the app takes at most "
             f"{MAX_FOOTER_ACTIONS}."
         )
     _check_inline_images(blocks)
     _check_fields_blocks(blocks)
     if (chain := _chain_depth(content)) > MAX_CHAIN_DEPTH:
-        raise ValueError(
+        raise SurfaceLimitError(
             f"{chain} chained surfaces after the first one, the app takes at most "
             f"{MAX_CHAIN_DEPTH} ({MAX_CHAIN_DEPTH + 1} screens in a flow in total)."
         )
@@ -639,7 +673,7 @@ def _check_inline_images(blocks: list[tuple[Any, int]]) -> None:
         if isinstance(block, ImageBlock) and block.data
     )
     if images > MAX_INLINE_IMAGES_BYTES:
-        raise ValueError(
+        raise SurfaceLimitError(
             f"Inline images add up to {images} bytes, the app takes at most "
             f"{MAX_INLINE_IMAGES_BYTES}."
         )
@@ -648,7 +682,7 @@ def _check_inline_images(blocks: list[tuple[Any, int]]) -> None:
 def _check_fields_blocks(blocks: list[tuple[Any, int]]) -> None:
     fields = [f for block, _ in blocks if isinstance(block, FieldsBlock) for f in block.fields]
     if len(fields) > MAX_CONTENT_FIELDS:
-        raise ValueError(
+        raise SurfaceLimitError(
             f"{len(fields)} fields in the `fields` blocks, the app takes at most "
             f"{MAX_CONTENT_FIELDS} together."
         )

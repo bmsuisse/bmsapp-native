@@ -244,6 +244,8 @@ MAX_PHOTO_DIMENSION = 4096
 MAX_SCAN_PAGES = 20
 #: `repeat.max` is at most this many rows.
 MAX_REPEAT_ROWS = 50
+#: A `repeat` group has 1 to this many fields per row.
+MAX_REPEAT_FIELDS = 10
 
 BarcodeSymbology = Literal[
     "aztec",
@@ -263,6 +265,18 @@ BarcodeSymbology = Literal[
 """The symbologies a `barcode` field can be restricted to."""
 
 Number = int | float
+
+
+class SurfaceLimitError(ValueError):
+    """A definition is beyond a limit of the app (`MAX_*`): the app answers
+    `tooLarge`, nothing is cut silently. Every other problem of a definition is
+    `invalid`.
+
+    The models raise it inside their validators, so Pydantic reports it as a
+    `ValidationError`; the exception itself is `error["ctx"]["error"]` of the
+    entry in `ValidationError.errors()`. A backend that answers like the app
+    can tell the two apart that way.
+    """
 
 
 class ActionField(_CamelModel):
@@ -367,8 +381,8 @@ def _check_ranges(field: ActionField) -> None:
 
 
 def _check_repeat(field: ActionField) -> None:
-    if not field.fields:
-        raise ValueError(f"`{field.id}`: a `repeat` group needs `fields`.")
+    if not field.fields or len(field.fields) > MAX_REPEAT_FIELDS:
+        raise ValueError(f"`{field.id}`: a `repeat` group needs 1 to {MAX_REPEAT_FIELDS} `fields`.")
     for inner in field.fields:
         if inner.type not in REPEAT_INNER_FIELD_TYPES:
             raise ValueError(
@@ -385,7 +399,9 @@ def _check_repeat(field: ActionField) -> None:
     if len(inner_ids) != len(set(inner_ids)):
         raise ValueError(f"`{field.id}`: the `id`s inside a `repeat` group must be unique.")
     if field.max is not None and field.max > MAX_REPEAT_ROWS:
-        raise ValueError(f"`{field.id}`: a `repeat` group has at most {MAX_REPEAT_ROWS} rows.")
+        raise SurfaceLimitError(
+            f"`{field.id}`: a `repeat` group has at most {MAX_REPEAT_ROWS} rows."
+        )
 
 
 class ActionPage(_CamelModel):

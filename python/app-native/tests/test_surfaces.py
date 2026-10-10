@@ -15,9 +15,11 @@ from bmsdna.app_native import (
     MAX_FORM_FIELDS,
     MAX_FORM_PAGES,
     MAX_INLINE_IMAGE_BYTES,
+    MAX_REPEAT_FIELDS,
     MAX_SURFACE_DEFINITION_BYTES,
     MAX_TABLE_COLUMNS,
     MAX_TABLE_ROWS,
+    MAX_THEN_STEPS,
     ActionButton,
     ActionData,
     ActionField,
@@ -43,6 +45,7 @@ from bmsdna.app_native import (
     RowBlock,
     ShowContentStep,
     ShowFormStep,
+    SurfaceLimitError,
     TableBlock,
     TextBlock,
     dump_native_content,
@@ -162,7 +165,7 @@ def test_repeat_group_rules() -> None:
     field = ActionField(id="lines", type="repeat", fields=inner, min=1, max=50, add_label="Add")
     assert field.fields is not None and len(field.fields) == 2
 
-    with pytest.raises(ValidationError, match="needs `fields`"):
+    with pytest.raises(ValidationError, match="needs 1 to 10 `fields`"):
         ActionField(id="lines", type="repeat")
     with pytest.raises(ValidationError, match="cannot contain"):
         ActionField(id="lines", type="repeat", fields=[ActionField(id="p", type="photo")])
@@ -309,7 +312,7 @@ def test_table_column_keys_must_be_unique() -> None:
 
 
 def test_follow_up_steps() -> None:
-    action = NativeAction.model_validate(
+    first = NativeAction.model_validate(
         {
             "id": "go",
             "label": "Go",
@@ -320,21 +323,32 @@ def test_follow_up_steps() -> None:
                 {"copy": "123"},
                 {"share": {"text": "Hi"}},
                 {"close": True},
+            ],
+        }
+    )
+    steps = first.then or []
+    assert isinstance(steps[2], OpenUrlStep)
+    assert isinstance(steps[3], CopyStep) and steps[3].text == "123"
+    assert isinstance(steps[5], CloseStep)
+
+    chained = NativeAction.model_validate(
+        {
+            "id": "next",
+            "label": "Next",
+            "then": [
                 {"device": {"action": "callPhone", "number": "+41 44 000 00 00"}},
                 {"showForm": {"fields": [{"id": "reason"}]}},
                 {"showContent": {"blocks": [DIVIDER]}},
             ],
         }
     )
-    steps = action.then or []
-    assert isinstance(steps[2], OpenUrlStep)
-    assert isinstance(steps[3], CopyStep) and steps[3].text == "123"
-    assert isinstance(steps[5], CloseStep)
-    assert isinstance(steps[6], DeviceStep)
-    assert isinstance(steps[7], ShowFormStep)
-    assert isinstance(steps[8], ShowContentStep)
+    steps = chained.then or []
+    assert isinstance(steps[0], DeviceStep)
+    assert isinstance(steps[1], ShowFormStep)
+    assert isinstance(steps[2], ShowContentStep)
+
     # And back to the app format.
-    dumped = NativeContent(blocks=[ButtonsBlock(items=[action])])
+    dumped = NativeContent(blocks=[ButtonsBlock(items=[first, chained])])
     assert dump_native_content(dumped)["blocks"][0]["items"][0]["then"][3] == {"copy": "123"}
 
 
@@ -559,3 +573,80 @@ def test_select_needs_options_or_remote_in_a_native_form() -> None:
         fields=[ActionField(id="kind", type="select")],
         buttons=[ActionButton(id="go", label="Go")],
     )
+
+
+# --- repeat fields and then steps: the two limits the app enforces ------------
+
+
+def _is_limit(error: ValidationError) -> bool:
+    """What a backend answering like the app does: `tooLarge`, not `invalid`."""
+    return any(isinstance(e.get("ctx", {}).get("error"), SurfaceLimitError) for e in error.errors())
+
+
+def test_a_repeat_group_has_1_to_10_fields_and_that_is_invalid_not_too_large() -> None:
+    def group(count: int) -> ActionField:
+        inner = [ActionField(id=f"f{i}", type="text") for i in range(count)]
+        return ActionField(id="lines", type="repeat", fields=inner)
+
+    assert MAX_REPEAT_FIELDS == 10
+    assert len(group(1).fields or []) == 1
+    assert len(group(10).fields or []) == 10
+    for count in (0, 11):
+        with pytest.raises(ValidationError, match="1 to 10") as caught:
+            group(count)
+        assert not _is_limit(caught.value)  # the app answers `invalid`
+
+
+def test_then_has_at_most_6_steps_and_that_is_too_large() -> None:
+    def action(count: int) -> dict[str, Any]:
+        return {"id": "go", "label": "Go", "then": [{"copy": str(i)} for i in range(count)]}
+
+    assert MAX_THEN_STEPS == 6
+    assert len(NativeAction.model_validate(action(6)).then or []) == 6
+    with pytest.raises(ValidationError, match="at most 6") as caught:
+        NativeAction.model_validate(action(7))
+    assert _is_limit(caught.value)  # the app answers `tooLarge`
+
+
+def test_then_steps_are_checked_in_a_chained_definition_too() -> None:
+    too_long = {"id": "inner", "label": "Inner", "then": [{"close": True}] * 7}
+    chained = {"blocks": [DIVIDER], "actions": [too_long]}
+    with pytest.raises(ValidationError, match="at most 6"):
+        NativeContent.model_validate(
+            {
+                "blocks": [DIVIDER],
+                "actions": [
+                    {"id": "outer", "label": "Outer", "then": [{"showContent": chained}]},
+                ],
+            }
+        )
+
+
+def test_limits_are_too_large_and_everything_else_is_invalid() -> None:
+    def failure(build: Any) -> ValidationError:
+        with pytest.raises(ValidationError) as caught:
+            build()
+        return caught.value
+
+    fields = [ActionField(id=f"f{i}") for i in range(MAX_FORM_FIELDS + 1)]
+    buttons = [{"id": f"b{i}", "label": "B"} for i in range(7)]
+    columns = [{"key": f"c{i}", "label": "C"} for i in range(MAX_TABLE_COLUMNS + 1)]
+    one_column = [{"key": "c", "label": "C"}]
+    rows = [{"c": 1}] * (MAX_TABLE_ROWS + 1)
+
+    # Beyond a limit: `tooLarge`.
+    assert _is_limit(failure(lambda: NativeForm(fields=fields)))
+    assert _is_limit(failure(lambda: NativeContent(blocks=[DividerBlock()] * 101)))
+    assert _is_limit(failure(lambda: ButtonsBlock.model_validate({"items": buttons})))
+    assert _is_limit(failure(lambda: TableBlock.model_validate({"columns": columns, "rows": []})))
+    assert _is_limit(
+        failure(lambda: TableBlock.model_validate({"columns": one_column, "rows": rows}))
+    )
+    assert _is_limit(failure(lambda: ImageBlock(data=_data_uri(MAX_INLINE_IMAGE_BYTES + 1))))
+    assert _is_limit(failure(lambda: NativeContent.model_validate({"blocks": [_leaf_at(4)]})))
+
+    # Anything else: `invalid`.
+    assert not _is_limit(failure(lambda: ActionField(id="card", type="photo", max=11)))
+    assert not _is_limit(failure(lambda: RowBlock.model_validate({"blocks": [DIVIDER] * 4})))
+    assert not _is_limit(failure(lambda: NativeForm(tint="blue", fields=[ActionField(id="a")])))
+    assert not _is_limit(failure(lambda: NativeContent(blocks=[])))

@@ -393,7 +393,10 @@ all with existing building blocks; there is nothing else to mount. Full guide:
 **1. Serve the definition** (optional; the page can also build it itself).
 `NativeForm` and `NativeContent` have the same shape as the TypeScript types and
 validate the format and the app's limits (`MAX_FORM_FIELDS`, `MAX_CONTENT_BLOCKS`,
-…), so typos show up here and not as `invalid` on the device:
+`MAX_REPEAT_FIELDS`, `MAX_THEN_STEPS`, …), so typos show up here and not as
+`invalid` or `tooLarge` on the device. A definition beyond a limit raises
+`SurfaceLimitError` (what the app answers `tooLarge`); every other problem is
+`invalid`:
 
 ```python
 from bmsdna.app_native import ActionField, NativeForm, NativeFormSubmit

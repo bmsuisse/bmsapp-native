@@ -16,6 +16,7 @@ import {
   type NativeContentDef,
   type NativeFormDef,
   type NativeFormField,
+  type NativeThen,
   type NativeFormResult,
   type NativeSurfaceActionEvent,
 } from '../src/index.js'
@@ -497,6 +498,103 @@ describe('round trip: showForm with onSubmit', () => {
   })
 })
 
+describe('round trip: a returned then the app would refuse', () => {
+  const tooLong = Array.from({ length: 7 }, (_, i) => ({ copy: `${i}` }))
+  let warn: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  it('warns in development builds and still sends the answer', async () => {
+    const { bridge, surface } = installSurfaceBridge()
+    const pending = showForm(customerForm, { onSubmit: () => ({ then: tooLong }) })
+
+    appCallsPage({ id: 'new-customer', action: 'submit', values: {} })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]![0]).toMatch(
+      /^\[@bmsuisse\/app-native\] surfaceResult: then: 7 `then` steps, the app takes at most 6/
+    )
+    expect(sentResults(bridge)).toEqual([{ id: 'new-customer', ok: true, then: tooLong }])
+    surface.resolve({ ok: false, error: 'cancelled' })
+    await pending
+  })
+
+  it('stays quiet at 6 steps, with validate: false and in a production build', async () => {
+    const { bridge, surface } = installSurfaceBridge()
+    const answers = [{ then: tooLong.slice(0, 6) }, { then: tooLong }, { then: tooLong }]
+    let call = 0
+    const pending = showContent(
+      { id: 'order', blocks: [{ type: 'divider' }] },
+      { onAction: () => answers[call++], validate: false }
+    )
+    appCallsPage({ id: 'order', action: 'a' })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+    appCallsPage({ id: 'order', action: 'a' })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(2))
+    expect(warn).not.toHaveBeenCalled()
+    surface.resolve({ ok: true, id: 'order', action: 'dismiss' })
+    await pending
+
+    // A production build does not warn either.
+    vi.stubEnv('NODE_ENV', 'production')
+    const off = onSurfaceAction('prod-step', () => ({ then: tooLong }))
+    appCallsPage({ id: 'prod-step', action: 'submit' })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(3))
+    expect(warn).not.toHaveBeenCalled()
+    off()
+  })
+
+  it('does not look at the then of a rejected answer: the app ignores it too', async () => {
+    const { bridge, surface } = installSurfaceBridge()
+    const pending = showForm(customerForm, {
+      onSubmit: () => ({ fieldErrors: { name: 'Taken' }, then: tooLong }),
+    })
+
+    appCallsPage({ id: 'new-customer', action: 'submit', values: {} })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+
+    expect(warn).not.toHaveBeenCalled()
+    expect(sentResults(bridge)).toEqual([
+      { id: 'new-customer', ok: false, fieldErrors: { name: 'Taken' } },
+    ])
+    surface.resolve({ ok: false, error: 'cancelled' })
+    await pending
+  })
+
+  it('warns for a chained surface answered through onSurfaceAction as well', async () => {
+    const { bridge } = installSurfaceBridge()
+    const off = onSurfaceAction('chained-step', () => ({ then: tooLong }))
+
+    appCallsPage({ id: 'chained-step', action: 'submit', values: {} })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    off()
+  })
+
+  it('looks into content that the answer chains to', async () => {
+    const { bridge, surface } = installSurfaceBridge()
+    const created: NativeContentDef = {
+      blocks: [{ type: 'divider' }],
+      actions: [{ id: 'done', label: 'Done', then: tooLong }],
+    }
+    const pending = showForm(customerForm, {
+      onSubmit: () => ({ then: [{ showContent: created }] }),
+    })
+
+    appCallsPage({ id: 'new-customer', action: 'submit', values: {} })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+
+    expect(warn.mock.calls[0]![0]).toContain(
+      'then[0].showContent.actions[0] (done).then: 7 `then` steps'
+    )
+    surface.resolve({ ok: false, error: 'cancelled' })
+    await pending
+  })
+})
+
 describe('round trip: labels and chained surfaces', () => {
   it('hands the labels of the app to the handler', async () => {
     const { bridge, surface } = installSurfaceBridge()
@@ -948,6 +1046,91 @@ describe('limit warnings', () => {
         ],
       })
     ).toEqual([])
+  })
+
+  it('name the number of fields in a repeat group (1 to 10)', () => {
+    const limits = NATIVE_SURFACE_LIMITS
+    expect(limits.repeatFields).toBe(10)
+    const group = (count: number): NativeFormField => ({
+      id: 'lines',
+      type: 'repeat',
+      fields: Array.from({ length: count }, (_, i) => ({ id: `f${i}`, type: 'text' as const })),
+    })
+    expect(formLimitWarnings({ fields: [group(1)] })).toEqual([])
+    expect(formLimitWarnings({ fields: [group(10)] })).toEqual([])
+    expect(formLimitWarnings({ fields: [group(11)] })).toEqual([
+      expect.stringContaining(
+        'fields[0] (lines): a repeat group has 11 fields, the app takes 1 to 10'
+      ),
+    ])
+    expect(formLimitWarnings({ fields: [group(0)] })).toEqual([
+      expect.stringContaining('a repeat group has 0 fields'),
+    ])
+    // The same field inside a content screen.
+    expect(contentLimitWarnings({ blocks: [{ type: 'fields', fields: [group(11)] }] })).toEqual([
+      expect.stringContaining('blocks[0].fields[0] (lines): a repeat group has 11 fields'),
+    ])
+  })
+
+  it('name a then list of more than 6 steps, wherever it is', () => {
+    expect(NATIVE_SURFACE_LIMITS.thenSteps).toBe(6)
+    const steps = (count: number): NativeThen[] =>
+      Array.from({ length: count }, (_, i) => ({ copy: `${i}` }))
+    const divider = { type: 'divider' as const }
+
+    // At the limit: nothing to say.
+    expect(
+      contentLimitWarnings({
+        blocks: [divider],
+        actions: [{ id: 'go', label: 'Go', then: steps(6) }],
+      })
+    ).toEqual([])
+
+    // Footer, buttons block, list row and a card around it, each with its own path.
+    expect(
+      contentLimitWarnings({
+        blocks: [
+          { type: 'buttons', items: [{ id: 'b', label: 'B', then: steps(7) }] },
+          {
+            type: 'card',
+            blocks: [
+              {
+                type: 'list',
+                items: [{ title: 'Row', action: { id: 'r', label: 'R', then: steps(8) } }],
+              },
+            ],
+          },
+        ],
+        actions: [{ id: 'f', label: 'F', then: steps(9) }],
+      })
+    ).toEqual([
+      expect.stringContaining('actions[0] (f).then: 9 `then` steps, the app takes at most 6'),
+      expect.stringContaining('blocks[0].items[0] (b).then: 7 `then` steps'),
+      expect.stringContaining('blocks[1].blocks[0].items[0].action (r).then: 8 `then` steps'),
+    ])
+  })
+
+  it('look into the content that a then step chains to', () => {
+    const inner: NativeContentDef = {
+      blocks: [{ type: 'divider' }],
+      actions: [
+        {
+          id: 'inner',
+          label: 'Inner',
+          then: Array.from({ length: 7 }, () => ({ close: true as const })),
+        },
+      ],
+    }
+    expect(
+      contentLimitWarnings({
+        blocks: [{ type: 'divider' }],
+        actions: [{ id: 'outer', label: 'Outer', then: [{ showContent: inner }] }],
+      })
+    ).toEqual([
+      expect.stringContaining(
+        'actions[0] (outer).then[0].showContent.actions[0] (inner).then: 7 `then` steps'
+      ),
+    ])
   })
 
   it('name the ranges of photo dimension and scan pages', () => {
