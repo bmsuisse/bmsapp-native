@@ -8,9 +8,11 @@ import {
   formLimitWarnings,
   isNativeSurfaceUnsupported,
   on,
+  onSurfaceAction,
   showContent,
   showForm,
   surfaceResult,
+  type NativeContentBlock,
   type NativeContentDef,
   type NativeFormDef,
   type NativeFormField,
@@ -495,6 +497,130 @@ describe('round trip: showForm with onSubmit', () => {
   })
 })
 
+describe('round trip: labels and chained surfaces', () => {
+  it('hands the labels of the app to the handler', async () => {
+    const { bridge, surface } = installSurfaceBridge()
+    const onSubmit = vi.fn()
+    const pending = showForm(customerForm, { onSubmit })
+
+    appCallsPage({
+      id: 'new-customer',
+      action: 'submit',
+      values: { owner: 'u-1' },
+      labels: { owner: 'Anna Muster' },
+    })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+
+    expect(onSubmit.mock.calls[0]![1]).toMatchObject({ labels: { owner: 'Anna Muster' } })
+    surface.resolve({ ok: false, error: 'cancelled' })
+    await pending
+  })
+
+  it('answers a chained surface through onSurfaceAction, by its explicit id', async () => {
+    const { bridge, surface } = installSurfaceBridge()
+    const onReason = vi.fn(async () => ({ message: 'Rejected' }))
+    const off = onSurfaceAction('reject-reason', onReason)
+    const def: NativeContentDef = {
+      id: 'order',
+      blocks: [{ type: 'divider' }],
+      actions: [
+        {
+          id: 'reject',
+          label: 'Reject',
+          then: [
+            {
+              showForm: {
+                id: 'reject-reason',
+                submit: { wait: true },
+                fields: [{ id: 'reason', type: 'textarea' }],
+              },
+            },
+          ],
+        },
+      ],
+    }
+
+    const pending = showContent(def) // no onAction: the root has no round trip of its own
+    expect(bridge.call).toHaveBeenCalledWith('showContent', def) // not rewritten
+
+    appCallsPage({
+      id: 'reject-reason',
+      action: 'submit',
+      values: { reason: 'Too expensive' },
+      labels: {},
+    })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+
+    expect(onReason).toHaveBeenCalledWith({
+      id: 'reject-reason',
+      action: 'submit',
+      values: { reason: 'Too expensive' },
+      labels: {},
+    })
+    expect(sentResults(bridge)).toEqual([{ id: 'reject-reason', ok: true, message: 'Rejected' }])
+    surface.resolve({ ok: true, id: 'order', action: 'reject' })
+    await pending
+    off()
+  })
+
+  it('maps field errors and thrown errors of a chained surface like onSubmit', async () => {
+    const { bridge } = installSurfaceBridge()
+    let attempt = 0
+    const off = onSurfaceAction('step-2', () => {
+      if (++attempt === 1) return { fieldErrors: { reason: 'Required' } }
+      throw new Error('Not allowed')
+    })
+
+    appCallsPage({ id: 'step-2', action: 'submit', values: {} })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+    appCallsPage({ id: 'step-2', action: 'submit', values: {} })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(2))
+
+    expect(sentResults(bridge)).toEqual([
+      { id: 'step-2', ok: false, fieldErrors: { reason: 'Required' } },
+      { id: 'step-2', ok: false, message: 'Not allowed' },
+    ])
+    off()
+  })
+
+  it('stops answering after the returned function is called', async () => {
+    const { bridge } = installSurfaceBridge()
+    const handler = vi.fn()
+    const off = onSurfaceAction('step-3', handler)
+    off()
+
+    appCallsPage({ id: 'step-3', action: 'submit' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(handler).not.toHaveBeenCalled()
+    expect(sentResults(bridge)).toEqual([])
+  })
+
+  it('lets a later registration replace the earlier one, and only its own off removes it', async () => {
+    const { bridge } = installSurfaceBridge()
+    const first = vi.fn(() => ({ message: 'first' }))
+    const second = vi.fn(() => ({ message: 'second' }))
+    const offFirst = onSurfaceAction('step-4', first)
+    const offSecond = onSurfaceAction('step-4', second)
+    offFirst() // must not remove the newer one
+
+    appCallsPage({ id: 'step-4', action: 'submit' })
+    await vi.waitFor(() => expect(sentResults(bridge)).toHaveLength(1))
+
+    expect(first).not.toHaveBeenCalled()
+    expect(sentResults(bridge)).toEqual([{ id: 'step-4', ok: true, message: 'second' }])
+    offSecond()
+  })
+
+  it('registers nothing outside the app', () => {
+    removeBridge()
+    const off = onSurfaceAction('step-5', vi.fn())
+    expect(typeof off).toBe('function')
+    expect(() => off()).not.toThrow()
+  })
+})
+
 describe('round trip: several loaded copies of the package', () => {
   it('lets every copy answer its own surfaces behind the single global', async () => {
     const bridge = installBridge({
@@ -717,14 +843,18 @@ describe('limit warnings', () => {
     }))
     expect(contentLimitWarnings({ blocks })).toEqual([expect.stringContaining('101 blocks')])
 
-    const deep = (levels: number): NativeContentDef => {
+    // A leaf at `level`, the top level counting as 1: `level - 1` cards around it.
+    const leafAt = (level: number): NativeContentDef => {
       let block: NativeContentDef['blocks'][number] = { type: 'divider' }
-      for (let i = 0; i < levels; i++) block = { type: 'card', blocks: [block] }
+      for (let i = 1; i < level; i++) block = { type: 'card', blocks: [block] }
       return { blocks: [block] }
     }
-    expect(contentLimitWarnings(deep(limits.contentNesting))).toEqual([])
-    expect(contentLimitWarnings(deep(limits.contentNesting + 1))).toEqual([
-      expect.stringContaining('nested 4 deep'),
+    expect(limits.contentNesting).toBe(3)
+    expect(contentLimitWarnings(leafAt(1))).toEqual([])
+    expect(contentLimitWarnings(leafAt(3))).toEqual([]) // card > card > divider
+    expect(contentLimitWarnings(leafAt(4))).toEqual([
+      // card > card > card > divider
+      expect.stringContaining('nested 4 levels deep'),
     ])
 
     const actions = Array.from({ length: 5 }, (_, i) => ({ id: `a${i}`, label: 'A' }))
@@ -756,14 +886,87 @@ describe('limit warnings', () => {
       })
     ).toEqual([expect.stringContaining('blocks[0].fields[0] (big): 201 options')])
 
-    let content: NativeContentDef = { blocks: [] }
-    for (let i = 0; i < 6; i++) {
-      content = {
-        blocks: [],
-        actions: [{ id: 'next', label: 'Next', then: [{ showContent: content }] }],
+    // `chained` surfaces after the first one.
+    const chain = (chained: number): NativeContentDef => {
+      let content: NativeContentDef = { blocks: [{ type: 'divider' }] }
+      for (let i = 0; i < chained; i++) {
+        content = {
+          blocks: [{ type: 'divider' }],
+          actions: [{ id: 'next', label: 'Next', then: [{ showContent: content }] }],
+        }
       }
+      return content
     }
-    expect(contentLimitWarnings(content)).toEqual([expect.stringContaining('6 chained')])
+    expect(NATIVE_SURFACE_LIMITS.chainDepth).toBe(4) // 5 screens in a flow in total
+    expect(contentLimitWarnings(chain(4))).toEqual([])
+    expect(contentLimitWarnings(chain(5))).toEqual([
+      expect.stringContaining('5 chained surfaces after the first one'),
+    ])
+    expect(contentLimitWarnings(chain(5))[0]).toContain('5 screens in a flow in total')
+  })
+
+  it('name the limits of tables, buttons blocks and fields blocks', () => {
+    const limits = NATIVE_SURFACE_LIMITS
+    const columns = Array.from({ length: limits.tableColumns + 1 }, (_, i) => ({
+      key: `c${i}`,
+      label: `C${i}`,
+    }))
+    const rows = Array.from({ length: limits.tableRows + 1 }, () => ({ c0: 1 }))
+    expect(
+      contentLimitWarnings({ blocks: [{ type: 'table', columns: columns.slice(0, 20), rows }] })
+    ).toEqual([expect.stringContaining('blocks[0]: 201 rows')])
+    expect(contentLimitWarnings({ blocks: [{ type: 'table', columns, rows: [] }] })).toEqual([
+      expect.stringContaining('blocks[0]: 21 columns'),
+    ])
+
+    const button = (i: number) => ({ id: `b${i}`, label: 'B' })
+    const buttons = (n: number) => Array.from({ length: n }, (_, i) => button(i))
+    expect(
+      contentLimitWarnings({
+        blocks: [{ type: 'buttons', items: buttons(limits.buttonsPerBlock) }],
+      })
+    ).toEqual([])
+    expect(contentLimitWarnings({ blocks: [{ type: 'buttons', items: buttons(7) }] })).toEqual([
+      expect.stringContaining('blocks[0]: 7 buttons'),
+    ])
+
+    const fields = (from: number, n: number) =>
+      Array.from({ length: n }, (_, i) => ({ id: `f${from + i}`, type: 'text' as const }))
+    expect(
+      contentLimitWarnings({
+        blocks: [
+          { type: 'fields', fields: fields(0, 30) },
+          { type: 'card', blocks: [{ type: 'fields', fields: fields(30, 31) }] },
+        ],
+      })
+    ).toEqual([expect.stringContaining('61 fields in the `fields` blocks')])
+    expect(
+      contentLimitWarnings({
+        blocks: [
+          { type: 'fields', fields: fields(0, 30) },
+          { type: 'fields', fields: fields(30, 30) },
+        ],
+      })
+    ).toEqual([])
+  })
+
+  it('name the ranges of photo dimension and scan pages', () => {
+    const warnings = (field: NativeFormField) => formLimitWarnings({ fields: [field] })
+    expect(warnings({ id: 'p', type: 'photo', maxDimension: 256 })).toEqual([])
+    expect(warnings({ id: 'p', type: 'photo', maxDimension: 4096 })).toEqual([])
+    expect(warnings({ id: 'p', type: 'photo', maxDimension: 255 })).toEqual([
+      expect.stringContaining('maxDimension 255 is outside 256…4096'),
+    ])
+    expect(warnings({ id: 'p', type: 'photo', maxDimension: 4097 })).toEqual([
+      expect.stringContaining('maxDimension 4097 is outside 256…4096'),
+    ])
+    expect(warnings({ id: 's', type: 'scan', max: 20 })).toEqual([])
+    expect(warnings({ id: 's', type: 'scan', max: 21 })).toEqual([
+      expect.stringContaining('scan max 21 is outside 1…20 pages'),
+    ])
+    expect(warnings({ id: 's', type: 'scan', max: 0 })).toEqual([
+      expect.stringContaining('scan max 0 is outside 1…20 pages'),
+    ])
   })
 })
 
@@ -828,5 +1031,39 @@ describe('types', () => {
     // @ts-expect-error a segmented control needs its options
     const noOptions: NativeFormField = { id: 's', type: 'segmented' }
     expect([fields, password, photoInRepeat, noOptions]).toHaveLength(4)
+  })
+
+  it('knows the symbologies and does not allow a condition inside a repeat group', () => {
+    const barcode: NativeFormField = { id: 'g', type: 'barcode', symbologies: ['ean13', 'qr'] }
+    const wrongSymbology: NativeFormField = {
+      id: 'g',
+      type: 'barcode',
+      // @ts-expect-error not one of the symbologies of the scanner
+      symbologies: ['ean-13'],
+    }
+    const conditionalRow: NativeFormField = {
+      id: 'lines',
+      type: 'repeat',
+      fields: [
+        {
+          id: 'qty',
+          type: 'stepper',
+          // @ts-expect-error fields inside a repeat group cannot be conditional
+          visibleIf: { field: 'x' },
+        },
+      ],
+    }
+    const scan: NativeFormField = { id: 's', type: 'scan', format: 'pdf', max: 5 }
+    expect([barcode, wrongSymbology, conditionalRow, scan]).toHaveLength(4)
+  })
+
+  it('lets text align trailing and knows the labels of an event', () => {
+    const block: NativeContentBlock = { type: 'text', markdown: 'Total', align: 'trailing' }
+    const event: NativeSurfaceActionEvent = {
+      id: 'x',
+      action: 'submit',
+      labels: { owner: 'Anna Muster' },
+    }
+    expect([block, event]).toHaveLength(2)
   })
 })

@@ -234,12 +234,33 @@ REPEAT_INNER_FIELD_TYPES = frozenset(
     {"text", "number", "select", "toggle", "date", "textarea", "stepper"}
 )
 
-#: `photo.max` is 1 to this value.
+#: `photo.max` is 1 to this value (default in the app: 5).
 MAX_PHOTOS_PER_FIELD = 10
-#: `photo.max_dimension` is at most this many pixels.
+#: `photo.max_dimension` is at least this many pixels ...
+MIN_PHOTO_DIMENSION = 256
+#: ... and at most this many.
 MAX_PHOTO_DIMENSION = 4096
+#: `scan.max` (pages) is 1 to this value (default in the app: 10).
+MAX_SCAN_PAGES = 20
 #: `repeat.max` is at most this many rows.
 MAX_REPEAT_ROWS = 50
+
+BarcodeSymbology = Literal[
+    "aztec",
+    "codabar",
+    "code39",
+    "code93",
+    "code128",
+    "dataMatrix",
+    "ean8",
+    "ean13",
+    "i2of5",
+    "itf14",
+    "pdf417",
+    "qr",
+    "upce",
+]
+"""The symbologies a `barcode` field can be restricted to."""
 
 Number = int | float
 
@@ -292,7 +313,8 @@ class ActionField(_CamelModel):
     min_length: int | None = Field(default=None, ge=0)
     max_length: int | None = Field(default=None, ge=1)
     #: `number` and `stepper`: bounds. `photo`: the number of pictures
-    #: (`max`, 1 to 10). `repeat`: the number of rows (`min`, `max` up to 50).
+    #: (`max`, 1 to 10, default 5). `scan`: the number of pages (`max`, 1 to 20,
+    #: default 10). `repeat`: the number of rows (`min`, `max` up to 50).
     min: Number | None = None
     max: Number | None = None
     #: `stepper` only: the step, default 1.
@@ -304,12 +326,13 @@ class ActionField(_CamelModel):
     pattern_message: str | None = None
     #: `photo` only. Default in the app: `both`.
     source: Literal["camera", "library", "both"] | None = None
-    #: `photo` only: longest side in pixels after downscaling. Default 2048.
-    max_dimension: int | None = Field(default=None, ge=1, le=MAX_PHOTO_DIMENSION)
+    #: `photo` only: longest side in pixels after downscaling, 256 to 4096.
+    #: Default 2048.
+    max_dimension: int | None = Field(default=None, ge=MIN_PHOTO_DIMENSION, le=MAX_PHOTO_DIMENSION)
     #: `scan` only: `jpeg` (default, one file per page) or `pdf` (one file).
     format: Literal["jpeg", "pdf"] | None = None
-    #: `barcode` only: restrict the scanner to these symbologies.
-    symbologies: list[str] | None = None
+    #: `barcode` only: restrict the scanner to these symbologies. Default: all.
+    symbologies: list[BarcodeSymbology] | None = None
     #: `repeat` only: the fields of one row. Only `text`, `number`, `select`,
     #: `toggle`, `date`, `textarea` and `stepper`; no nested `repeat`.
     fields: list[ActionField] | None = None
@@ -324,22 +347,23 @@ class ActionField(_CamelModel):
             raise ValueError(f"`{self.id}`: `fields` only belongs to the type `repeat`.")
         if self.type in ("multiselect", "segmented") and not self.options:
             raise ValueError(f"`{self.id}`: type `{self.type}` needs `options`.")
-        photo_count_out_of_range = (
-            self.type == "photo"
-            and self.max is not None
-            and not 1 <= self.max <= MAX_PHOTOS_PER_FIELD
-        )
-        if photo_count_out_of_range:
-            raise ValueError(f"`{self.id}`: `max` of a `photo` is 1 to {MAX_PHOTOS_PER_FIELD}.")
-        if self.min is not None and self.max is not None and self.min > self.max:
-            raise ValueError(f"`{self.id}`: `min` is greater than `max`.")
-        if (
-            self.min_length is not None
-            and self.max_length is not None
-            and self.min_length > self.max_length
-        ):
-            raise ValueError(f"`{self.id}`: `min_length` is greater than `max_length`.")
+        _check_ranges(self)
         return self
+
+
+def _check_ranges(field: ActionField) -> None:
+    counts = {"photo": MAX_PHOTOS_PER_FIELD, "scan": MAX_SCAN_PAGES}
+    limit = counts.get(field.type)
+    if limit is not None and field.max is not None and not 1 <= field.max <= limit:
+        raise ValueError(f"`{field.id}`: `max` of a `{field.type}` is 1 to {limit}.")
+    if field.min is not None and field.max is not None and field.min > field.max:
+        raise ValueError(f"`{field.id}`: `min` is greater than `max`.")
+    if (
+        field.min_length is not None
+        and field.max_length is not None
+        and field.min_length > field.max_length
+    ):
+        raise ValueError(f"`{field.id}`: `min_length` is greater than `max_length`.")
 
 
 def _check_repeat(field: ActionField) -> None:
@@ -350,6 +374,12 @@ def _check_repeat(field: ActionField) -> None:
             raise ValueError(
                 f"`{field.id}`: a `repeat` group cannot contain the type `{inner.type}` "
                 f"(`{inner.id}`). Allowed: {', '.join(sorted(REPEAT_INNER_FIELD_TYPES))}."
+            )
+    for inner in field.fields:
+        if inner.visible_if is not None:
+            raise ValueError(
+                f"`{field.id}`: `{inner.id}` has `visible_if`, which a `repeat` group "
+                "does not support."
             )
     inner_ids = [inner.id for inner in field.fields]
     if len(inner_ids) != len(set(inner_ids)):

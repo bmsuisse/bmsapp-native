@@ -41,15 +41,16 @@ import {
 
 ## At a glance
 
-| Function                              | What it does                                       | Capability                       |
-| ------------------------------------- | -------------------------------------------------- | -------------------------------- |
-| `showForm(def, { onSubmit? })`        | Opens a native form                                | `nativeForms`                    |
-| `showContent(def, { onAction? })`     | Opens a native content screen                      | `nativeContent`                  |
-| `closeSurface({ id? })`               | Closes the open surface of your web app            | `nativeForms` or `nativeContent` |
-| `surfaceResult({ id, ok, … })`        | The page's answer in a round trip (low level)      | `nativeForms` or `nativeContent` |
-| `on('surfaceAction', …)`              | The app asks the page in a round trip (low level)  | –                                |
-| `canShowNativeForms()` / `…Content()` | Is it available here? Use it to keep your web UI   | –                                |
-| `isNativeSurfaceUnsupported(result)`  | Did the call fail because the feature is not here? | –                                |
+| Function                              | What it does                                                          | Capability                       |
+| ------------------------------------- | --------------------------------------------------------------------- | -------------------------------- |
+| `showForm(def, { onSubmit? })`        | Opens a native form                                                   | `nativeForms`                    |
+| `showContent(def, { onAction? })`     | Opens a native content screen                                         | `nativeContent`                  |
+| `closeSurface({ id? })`               | Closes the open surface of your web app                               | `nativeForms` or `nativeContent` |
+| `surfaceResult({ id, ok, … })`        | The page's answer in a round trip (low level)                         | `nativeForms` or `nativeContent` |
+| `on('surfaceAction', …)`              | The app asks the page in a round trip (low level)                     | –                                |
+| `onSurfaceAction(id, handler)`        | Answers the round trip of one surface by its `id`, e.g. a chained one | –                                |
+| `canShowNativeForms()` / `…Content()` | Is it available here? Use it to keep your web UI                      | –                                |
+| `isNativeSurfaceUnsupported(result)`  | Did the call fail because the feature is not here?                    | –                                |
 
 ## Capabilities
 
@@ -167,29 +168,29 @@ The fields are the same as in the forms of
 An older app shows a type it does not know as `text`: see
 [Old app versions](#fallback-browsers-and-old-app-versions).
 
-| `type`        | Shows                                                                                                                                                                       | In the result `values`                          |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `text`        | Single-line text (the default type)                                                                                                                                         | `string`                                        |
-| `number`      | Number                                                                                                                                                                      | `number`                                        |
-| `select`      | One of `options`; with `remote: true` loaded from your backend                                                                                                              | `string` (the option `value`), text in `labels` |
-| `toggle`      | Switch                                                                                                                                                                      | `boolean`                                       |
-| `date`        | Date                                                                                                                                                                        | `string` `yyyy-MM-dd`                           |
-| `search`      | Search field; results come from your backend (`minQueryLength`, default 2)                                                                                                  | `string` (the option `value`), text in `labels` |
-| `textarea`    | Multi-line text; `maxLength` shows a counter                                                                                                                                | `string`                                        |
-| `email`       | Text with the email keyboard and a format check                                                                                                                             | `string`                                        |
-| `phone`       | Text with the phone keyboard                                                                                                                                                | `string`                                        |
-| `url`         | Text with the URL keyboard and a format check                                                                                                                               | `string`                                        |
-| `multiselect` | Choose any number of `options`                                                                                                                                              | `string[]`                                      |
-| `segmented`   | A few `options` as a segmented control                                                                                                                                      | `string`                                        |
-| `stepper`     | Whole number with + and −: `min`, `max`, `step`                                                                                                                             | `number`                                        |
-| `time`        | Time of day                                                                                                                                                                 | `string` `HH:mm`                                |
-| `datetime`    | Date and time, device local, no time zone                                                                                                                                   | `string` `yyyy-MM-ddTHH:mm`                     |
-| `info`        | Read-only row (`label`, `value`)                                                                                                                                            | not part of the result                          |
-| `photo`       | Camera and/or library. `max` 1–10, `source` `camera` / `library` / `both`, `maxDimension` (default 2048, at most 4096)                                                      | `NativeFileRef[]`                               |
-| `scan`        | Document scanner. `format` `jpeg` (default, one file per page) or `pdf` (one file)                                                                                          | `NativeFileRef[]`                               |
-| `signature`   | Drawn with finger or pencil, PNG                                                                                                                                            | `NativeFileRef[]` (one)                         |
-| `barcode`     | Text field with a button that scans a barcode/QR code; `symbologies` restricts the scanner                                                                                  | `string`                                        |
-| `repeat`      | Repeating group (order lines): `fields`, `min`, `max` (at most 50), `addLabel`. Inside only `text`, `number`, `select`, `toggle`, `date`, `textarea`, `stepper`; no nesting | array of objects, one per row                   |
+| `type`        | Shows                                                                                                                                                                                                                            | In the result `values`                          |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `text`        | Single-line text (the default type)                                                                                                                                                                                              | `string`                                        |
+| `number`      | Number                                                                                                                                                                                                                           | `number`                                        |
+| `select`      | One of `options`; with `remote: true` loaded from your backend                                                                                                                                                                   | `string` (the option `value`), text in `labels` |
+| `toggle`      | Switch                                                                                                                                                                                                                           | `boolean`                                       |
+| `date`        | Date                                                                                                                                                                                                                             | `string` `yyyy-MM-dd`                           |
+| `search`      | Search field; results come from your backend (`minQueryLength`, default 2)                                                                                                                                                       | `string` (the option `value`), text in `labels` |
+| `textarea`    | Multi-line text; `maxLength` shows a counter                                                                                                                                                                                     | `string`                                        |
+| `email`       | Text with the email keyboard and a format check                                                                                                                                                                                  | `string`                                        |
+| `phone`       | Text with the phone keyboard                                                                                                                                                                                                     | `string`                                        |
+| `url`         | Text with the URL keyboard and a format check                                                                                                                                                                                    | `string`                                        |
+| `multiselect` | Choose any number of `options`                                                                                                                                                                                                   | `string[]`                                      |
+| `segmented`   | A few `options` as a segmented control                                                                                                                                                                                           | `string`                                        |
+| `stepper`     | Whole number with + and −: `min`, `max`, `step`                                                                                                                                                                                  | `number`                                        |
+| `time`        | Time of day                                                                                                                                                                                                                      | `string` `HH:mm`                                |
+| `datetime`    | Date and time, device local, no time zone                                                                                                                                                                                        | `string` `yyyy-MM-ddTHH:mm`                     |
+| `info`        | Read-only row (`label`, `value`)                                                                                                                                                                                                 | not part of the result                          |
+| `photo`       | Camera and/or library. `max` 1–10 (default 5), `source` `camera` / `library` / `both`, `maxDimension` 256–4096 (default 2048)                                                                                                    | `NativeFileRef[]`                               |
+| `scan`        | Document scanner. `format` `jpeg` (default, one file per page) or `pdf` (one file), `max` pages 1–20 (default 10)                                                                                                                | `NativeFileRef[]`                               |
+| `signature`   | Drawn with finger or pencil, PNG                                                                                                                                                                                                 | `NativeFileRef[]` (one)                         |
+| `barcode`     | Text field with a button that scans a barcode/QR code; `symbologies` restricts the scanner to some of `aztec`, `codabar`, `code39`, `code93`, `code128`, `dataMatrix`, `ean8`, `ean13`, `i2of5`, `itf14`, `pdf417`, `qr`, `upce` | `string`                                        |
+| `repeat`      | Repeating group (order lines): `fields`, `min`, `max` (at most 50), `addLabel`. Inside only `text`, `number`, `select`, `toggle`, `date`, `textarea`, `stepper`; no nesting, and no `visibleIf` inside the group                 | array of objects, one per row                   |
 
 There is deliberately **no password or secret field**: forms are not for
 signing in.
@@ -277,35 +278,36 @@ const result = await showContent({
 Same `id`, `title`, `size` (default `medium`), `tint` and `context` as for
 forms, plus:
 
-| Field      | Type       | Meaning                                                        |
-| ---------- | ---------- | -------------------------------------------------------------- |
-| `subtitle` | `string`   | Line under the title.                                          |
-| `blocks`   | `Block[]`  | The content, top to bottom. At most 100, nested ones included. |
-| `actions`  | `Action[]` | Buttons in the footer, at most 4.                              |
+| Field      | Type       | Meaning                                                                     |
+| ---------- | ---------- | --------------------------------------------------------------------------- |
+| `subtitle` | `string`   | Line under the title.                                                       |
+| `blocks`   | `Block[]`  | The content, top to bottom. At least 1, at most 100 (nested ones included). |
+| `actions`  | `Action[]` | Buttons in the footer, at most 4.                                           |
 
 ### Blocks
 
-| `type`                              | Fields                                                                                                                                                                            |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `heading`                           | `text`, `level` 1–3, `icon` (SF Symbol)                                                                                                                                           |
-| `text`                              | `markdown` (paragraphs, lists, quotes, tables, bold/italic/links; **no HTML**), `style` `body` / `caption` / `footnote`, `align` `leading` / `center`                             |
-| `image`                             | `url` (https) or `data` (`data:image/…`, at most 1 MB), `alt` (for VoiceOver), `caption`, `height`, `fit` `fit` / `fill`, `shape` `rounded` / `circle` / `none`, `tapToZoom`      |
-| `facts`                             | `items[{ label, value, kind, icon, copyable }]`; `kind` `text` / `phone` / `email` / `address` / `url`: phone, email, address and url rows are tappable (call, mail, route, open) |
-| `list`                              | `items[{ title, subtitle, trailing, icon, image, action }]`; a row with an `action` is tappable                                                                                   |
-| `table`                             | `columns[{ key, label, align }]`, `rows[{ key: value }]`, `caption`                                                                                                               |
-| `map`                               | `latitude`, `longitude`, `name`, `span` (visible area in meters), `height`                                                                                                        |
-| `file`                              | `url` (https), `name`, `mime`: a tap previews it (PDF, Office, images)                                                                                                            |
-| `video`                             | `url` (https), `poster`; no autoplay                                                                                                                                              |
-| `callout`                           | `style` `info` / `success` / `warning` / `error`, `title`, `text`                                                                                                                 |
-| `badges`                            | `items[{ text, tint, icon }]`                                                                                                                                                     |
-| `buttons`                           | `items`: actions in a row inside the content                                                                                                                                      |
-| `kpi`, `stats`, `chart`, `progress` | `data`: the same `data` as the [dashboard widget](dashboard-widgets-guide.md) of that kind                                                                                        |
-| `fields`                            | `fields[]`: form fields inside the content; their values come back with an action that has `submit: true`                                                                         |
-| `card`                              | `title`, `blocks`: a grouped container                                                                                                                                            |
-| `row`                               | `blocks`: two or three blocks side by side                                                                                                                                        |
-| `divider`, `spacer`                 | `spacer` has a `height`                                                                                                                                                           |
+| `type`                              | Fields                                                                                                                                                                                        |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `heading`                           | `text`, `level` 1–3, `icon` (SF Symbol)                                                                                                                                                       |
+| `text`                              | `markdown` (paragraphs, lists, quotes, tables, bold/italic/links; **no HTML**), `style` `body` / `caption` / `footnote`, `align` `leading` / `center` / `trailing`                            |
+| `image`                             | `url` (https) or `data` (`data:image/…`, at most 1 MB), `alt` (for VoiceOver), `caption`, `height`, `fit` `fit` / `fill`, `shape` `rounded` / `circle` / `none`, `tapToZoom`                  |
+| `facts`                             | `items[{ label, value, kind, icon, copyable }]`, at least 1; `kind` `text` / `phone` / `email` / `address` / `url`: phone, email, address and url rows are tappable (call, mail, route, open) |
+| `list`                              | `items[{ title, subtitle, trailing, icon, image, action }]`, at least 1; `image` is an `https` URL (not a `data:` URI); a row with an `action` is tappable                                    |
+| `table`                             | `columns[{ key, label, align }]` (1–20; `align` `leading` / `center` / `trailing`), `rows[{ key: value }]` (at most 200), `caption`                                                           |
+| `map`                               | `latitude`, `longitude`, `name`, `span` (visible area in meters), `height`                                                                                                                    |
+| `file`                              | `url` (https), `name`, `mime`: a tap previews it (PDF, Office, images)                                                                                                                        |
+| `video`                             | `url` (https), `poster`; no autoplay                                                                                                                                                          |
+| `callout`                           | `style` `info` / `success` / `warning` / `error`, `title`, `text`                                                                                                                             |
+| `badges`                            | `items[{ text, tint, icon }]`, at least 1                                                                                                                                                     |
+| `buttons`                           | `items`: 1–6 actions in a row inside the content                                                                                                                                              |
+| `kpi`, `stats`, `chart`, `progress` | `data`: the same `data` as the [dashboard widget](dashboard-widgets-guide.md) of that kind                                                                                                    |
+| `fields`                            | `fields[]`: form fields inside the content (all `fields` blocks of one screen together at most 60); their values come back with an action that has `submit: true`                             |
+| `card`                              | `title`, `blocks` (at least 1): a grouped container                                                                                                                                           |
+| `row`                               | `blocks`: two or three blocks side by side                                                                                                                                                    |
+| `divider`, `spacer`                 | `spacer` has a `height`                                                                                                                                                                       |
 
-`card` and `row` can be nested up to 3 deep. URLs on **your web app's own
+Blocks can be nested up to **3 levels**, counting the top level as 1:
+`card > card > text` is fine, `card > card > card > text` is `tooLarge`. URLs on **your web app's own
 backend** (`image`, `file`) are loaded with the Entra token of the app; images
 on other hosts load without credentials.
 
@@ -474,7 +476,8 @@ const result = await showForm(customerForm, {
 | throws an `Error`                            | `ok: false` with `message` set to the error's message — **shown to the user**, so throw readable messages. An error that carries `fieldErrors` marks those fields too |
 
 `onSubmit(values, event)` gets the submitted `values` and the event
-`{ id, action, values?, context? }`; `onAction(event)` for content gets
+`{ id, action, values?, labels?, context? }` (`labels` are the shown texts of
+`search` and `select` fields, as in the result); `onAction(event)` for content gets
 `event.action` (the tapped action's `id`) and `event.values` (the `fields`
 blocks, if the action had `submit: true`).
 
@@ -502,9 +505,9 @@ again" and re-enables the buttons. If `window.onNativeSurfaceAction` is not
 defined at all, the promise resolves `unavailable` instead of leaving the
 user stuck.
 
-The low-level pieces are exported for special cases: `surfaceResult(payload)`
-and `on('surfaceAction', event => …)`. Typical reason: a chained surface with
-a round trip of its own (see below).
+The low-level pieces are exported for special cases: `surfaceResult(payload)`,
+`on('surfaceAction', event => …)` and `onSurfaceAction(id, handler)`. Typical
+reason: a chained surface with a round trip of its own (see below).
 
 ## Chained flows
 
@@ -538,16 +541,53 @@ await showContent({
 ```
 
 The original promise resolves when the **whole flow** has ended; the last
-result is in `next` (nested, if several surfaces followed each other). At most
-5 chained surfaces.
+result is in `next` (nested, if several surfaces followed each other). A flow
+has at most **5 screens in total**: the first one and 4 chained ones.
 
 The page can also chain from its own answer: `onSubmit` returns
 `{ then: [{ showContent: createdCard }] }`.
 
+### A round trip in a chained surface
+
 A chained surface with a round trip of its own (`submit.wait` or an action with
-`wait`) calls the page with **its** `id`, so give it one and answer it with the
-low-level API: `on('surfaceAction', e => { if (e.id === 'reject-reason') … })`
-and `surfaceResult({ id, ok })`.
+`wait`) calls the page with **its** `id`. The app generates an id if the
+definition has none, and then the page cannot know it: **a chained definition
+that wants a round trip needs an explicit `id`**, and it has to switch the round
+trip on itself (`submit: { wait: true }`; the helper only rewrites the root
+definition). Register the handler with `onSurfaceAction`, which answers like
+`onSubmit` / `onAction` (return, `{ fieldErrors }`, throw):
+
+```ts
+const off = onSurfaceAction('reject-reason', async ({ values }) => {
+  await api.reject(order.id, values?.reason) // a thrown error keeps the form open
+})
+try {
+  await showContent({
+    id: 'order',
+    blocks: [{ type: 'text', markdown: `Order **${order.number}**` }],
+    actions: [
+      {
+        id: 'reject',
+        label: 'Reject',
+        then: [
+          {
+            showForm: {
+              id: 'reject-reason', // explicit
+              submit: { wait: true }, // switched on by you
+              fields: [{ id: 'reason', type: 'textarea', required: true }],
+            },
+          },
+        ],
+      },
+    ],
+  })
+} finally {
+  off() // the handler stays until you remove it
+}
+```
+
+A later registration for the same `id` replaces the earlier one. Outside the
+app nothing is registered.
 
 ## Fallback: browsers and old app versions
 
@@ -828,13 +868,33 @@ console before the call (`formLimitWarnings(def)` and
 | Inline `options` of one field                           | 200 (use `search` or `remote`) |
 | Rows of a `repeat` group                                | 50                             |
 | Content blocks (nested ones included)                   | 100                            |
-| Nesting of `card` / `row`                               | 3                              |
+| Levels of nested blocks (top level = 1)                 | 3                              |
 | Footer actions                                          | 4                              |
+| Buttons in one `buttons` block                          | 6                              |
+| Table columns / rows                                    | 20 / 200                       |
+| Fields in all `fields` blocks of one screen             | 60                             |
+| Pages of a `scan` field                                 | 20                             |
 | Inline image (`data:`)                                  | 1 MB each, 4 MB in total       |
-| Chained surfaces                                        | 5                              |
+| Chained surfaces after the first one                    | 4 (5 screens in a flow)        |
 | One uploaded media file (after downscaling)             | 25 MB                          |
 | All media of one form                                   | 100 MB                         |
 | Time to answer a round trip                             | 60 seconds                     |
+
+The Python models go further and reject what the app would answer `invalid`
+for, so a backend catches it before the device does:
+
+- `facts`, `list`, `badges` and `buttons` have at least one item; a `card` at
+  least one block; a `row` two or three blocks; a content definition at least
+  one block.
+- A `select` has `options`, or `remote: true`, in a native form.
+- A `photo` has `max_dimension` 256–4096, a `scan` `max` 1–20.
+- A `repeat` group has no `visible_if` inside.
+- An image `url`, `file`/`video` URL and list `image` is `https`, and
+  `open_url` is `https`, `tel` or `mailto`; `tint` is `#rrggbb`.
+
+The npm package's development warnings cover the **limits** above (and the
+ranges of `photo.maxDimension` and `scan.max`), not these structural rules: the
+app tells you with `invalid` and a field path.
 
 Warnings are logged by `showForm` and `showContent` unless `NODE_ENV` is
 `production` (or Vite's `import.meta.env.PROD` is set). Pass
@@ -853,7 +913,8 @@ to imitate the app or the system:
   content are not for signing in.
 - **No HTML, no script.** Content is only the block vocabulary above. Links
   only through explicit actions and only the schemes `https`, `tel` and
-  `mailto`; images `https` or `data:image/…`; videos and files `https`.
+  `mailto`; images `https` or `data:image/…` (the `image` of a list row: `https` only);
+  videos and files `https`.
 - **The token goes only to your own backend:** option lookups, uploads, and
   images and files on your own host. Never to another host.
 - **The app stores nothing of the entered values.** It remembers recently

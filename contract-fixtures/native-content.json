@@ -42,6 +42,7 @@
       "style": "body",
       "align": "leading"
     },
+    { "type": "text", "markdown": "Updated today", "style": "footnote", "align": "trailing" },
     {
       "type": "callout",
       "style": "warning",

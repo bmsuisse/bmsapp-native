@@ -55,16 +55,25 @@ MAX_FORM_FIELDS = 60
 MAX_FIELD_OPTIONS = 200
 #: Blocks of a content definition, nested ones included.
 MAX_CONTENT_BLOCKS = 100
-#: How deep `card` and `row` may be nested.
+#: Levels of blocks, the top level counting as 1: `card > card > text` is fine,
+#: `card > card > card > text` is too deep.
 MAX_BLOCK_NESTING = 3
 #: Buttons in the footer of a content definition.
 MAX_FOOTER_ACTIONS = 4
+#: Items of one `buttons` block.
+MAX_BUTTONS_PER_BLOCK = 6
+#: Columns and rows of one `table` block.
+MAX_TABLE_COLUMNS = 20
+MAX_TABLE_ROWS = 200
+#: Fields of all `fields` blocks of one content definition together.
+MAX_CONTENT_FIELDS = 60
 #: One inline `data:` image, decoded, in bytes.
 MAX_INLINE_IMAGE_BYTES = 1024 * 1024
 #: All inline images of a content definition, in bytes.
 MAX_INLINE_IMAGES_BYTES = 4 * 1024 * 1024
-#: Chained surfaces (`then: [{showForm}]`) after the first one.
-MAX_CHAIN_DEPTH = 5
+#: Chained surfaces (`then: [{showForm}]`) after the first one: a flow has at
+#: most five screens in total.
+MAX_CHAIN_DEPTH = 4
 
 #: Hex color `#rrggbb`.
 Tint = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
@@ -163,12 +172,23 @@ def _check_form_limits(form: NativeForm) -> None:
         raise ValueError(f"{len(fields)} fields, the app takes at most {MAX_FORM_FIELDS}.")
     for field in fields:
         _check_field_limits(field)
+        _check_select_options(field)
         rows = (form.values or {}).get(field.id)
         if field.type == "repeat" and isinstance(rows, list) and len(rows) > MAX_REPEAT_ROWS:
             raise ValueError(
                 f"`values.{field.id}` has {len(rows)} rows, the app takes at most "
                 f"{MAX_REPEAT_ROWS}."
             )
+
+
+def _check_select_options(field: ActionField) -> None:
+    """A `select` needs `options` or `remote=True`; the app rejects it otherwise."""
+    if field.type == "select" and not field.remote and not field.options:
+        raise ValueError(
+            f"`{field.id}`: a `select` needs `options`, or `remote=True` to load them."
+        )
+    for inner in field.fields or []:
+        _check_select_options(inner)
 
 
 def _check_field_limits(field: ActionField) -> None:
@@ -307,9 +327,14 @@ class NativeListItem(_CamelModel):
     subtitle: str | None = None
     trailing: Value | None = None
     icon: str | None = None
-    #: `https` URL or `data:image/...`.
+    #: `https` URL. Not a `data:` URI: the app rejects those here.
     image: str | None = None
     action: NativeAction | None = None
+
+    @model_validator(mode="after")
+    def _https(self) -> NativeListItem:
+        _require_https(self.image, "`image` of a `list` item")
+        return self
 
 
 class NativeTableColumn(_CamelModel):
@@ -336,7 +361,7 @@ class TextBlock(_CamelModel):
     #: Paragraphs, lists, quotes, tables, bold/italic/links. No HTML.
     markdown: str
     style: Literal["body", "caption", "footnote"] | None = None
-    align: Literal["leading", "center"] | None = None
+    align: Literal["leading", "center", "trailing"] | None = None
 
 
 def _decoded_data_uri_bytes(uri: str) -> int:
@@ -385,19 +410,19 @@ class ImageBlock(_CamelModel):
 
 class FactsBlock(_CamelModel):
     type: Literal["facts"] = "facts"
-    items: list[NativeFact]
+    items: list[NativeFact] = Field(min_length=1)
 
 
 class ListBlock(_CamelModel):
     type: Literal["list"] = "list"
-    items: list[NativeListItem]
+    items: list[NativeListItem] = Field(min_length=1)
 
 
 class TableBlock(_CamelModel):
     type: Literal["table"] = "table"
-    columns: list[NativeTableColumn] = Field(min_length=1)
-    #: One object per row, keyed by the column `key`.
-    rows: list[dict[str, str | int | float]]
+    columns: list[NativeTableColumn] = Field(min_length=1, max_length=MAX_TABLE_COLUMNS)
+    #: One object per row, keyed by the column `key`. At most 200.
+    rows: list[dict[str, str | int | float]] = Field(max_length=MAX_TABLE_ROWS)
     caption: str | None = None
 
     @model_validator(mode="after")
@@ -453,12 +478,13 @@ class CalloutBlock(_CamelModel):
 
 class BadgesBlock(_CamelModel):
     type: Literal["badges"] = "badges"
-    items: list[NativeBadge]
+    items: list[NativeBadge] = Field(min_length=1)
 
 
 class ButtonsBlock(_CamelModel):
     type: Literal["buttons"] = "buttons"
-    items: list[NativeAction]
+    #: One to six actions in a row.
+    items: list[NativeAction] = Field(min_length=1, max_length=MAX_BUTTONS_PER_BLOCK)
 
 
 class KpiBlock(_CamelModel):
@@ -492,13 +518,13 @@ class FieldsBlock(_CamelModel):
 class CardBlock(_CamelModel):
     type: Literal["card"] = "card"
     title: str | None = None
-    blocks: list[NativeContentBlock]
+    blocks: list[NativeContentBlock] = Field(min_length=1)
 
 
 class RowBlock(_CamelModel):
     type: Literal["row"] = "row"
     #: Two or three blocks side by side.
-    blocks: list[NativeContentBlock]
+    blocks: list[NativeContentBlock] = Field(min_length=2, max_length=3)
 
 
 class DividerBlock(_CamelModel):
@@ -541,7 +567,8 @@ class NativeContent(_SurfaceBase):
     """Definition of a content screen for `showContent`."""
 
     subtitle: str | None = None
-    blocks: list[NativeContentBlock]
+    #: At least one block.
+    blocks: list[NativeContentBlock] = Field(min_length=1)
     #: Buttons in the footer, at most 4.
     actions: list[NativeAction] | None = None
 
@@ -552,7 +579,8 @@ class NativeContent(_SurfaceBase):
         return self
 
 
-def _iter_blocks(blocks: Sequence[Any], depth: int = 0) -> Iterator[tuple[Any, int]]:
+def _iter_blocks(blocks: Sequence[Any], depth: int = 1) -> Iterator[tuple[Any, int]]:
+    """The blocks with their level: the top level is 1."""
     for block in blocks:
         yield block, depth
         if isinstance(block, CardBlock | RowBlock):
@@ -587,13 +615,24 @@ def _check_content_limits(content: NativeContent) -> None:
     deepest = max((depth for _, depth in blocks), default=0)
     if deepest > MAX_BLOCK_NESTING:
         raise ValueError(
-            f"Blocks are nested {deepest} deep, the app takes at most {MAX_BLOCK_NESTING}."
+            f"Blocks are nested {deepest} levels deep, the app takes at most "
+            f"{MAX_BLOCK_NESTING} (the top level counts as 1)."
         )
     if len(content.actions or []) > MAX_FOOTER_ACTIONS:
         raise ValueError(
             f"{len(content.actions or [])} footer actions, the app takes at most "
             f"{MAX_FOOTER_ACTIONS}."
         )
+    _check_inline_images(blocks)
+    _check_fields_blocks(blocks)
+    if (chain := _chain_depth(content)) > MAX_CHAIN_DEPTH:
+        raise ValueError(
+            f"{chain} chained surfaces after the first one, the app takes at most "
+            f"{MAX_CHAIN_DEPTH} ({MAX_CHAIN_DEPTH + 1} screens in a flow in total)."
+        )
+
+
+def _check_inline_images(blocks: list[tuple[Any, int]]) -> None:
     images = sum(
         _decoded_data_uri_bytes(block.data)
         for block, _ in blocks
@@ -604,12 +643,18 @@ def _check_content_limits(content: NativeContent) -> None:
             f"Inline images add up to {images} bytes, the app takes at most "
             f"{MAX_INLINE_IMAGES_BYTES}."
         )
-    for block, _ in blocks:
-        if isinstance(block, FieldsBlock):
-            for field in block.fields:
-                _check_field_limits(field)
-    if (chain := _chain_depth(content)) > MAX_CHAIN_DEPTH:
-        raise ValueError(f"{chain} chained surfaces, the app takes at most {MAX_CHAIN_DEPTH}.")
+
+
+def _check_fields_blocks(blocks: list[tuple[Any, int]]) -> None:
+    fields = [f for block, _ in blocks if isinstance(block, FieldsBlock) for f in block.fields]
+    if len(fields) > MAX_CONTENT_FIELDS:
+        raise ValueError(
+            f"{len(fields)} fields in the `fields` blocks, the app takes at most "
+            f"{MAX_CONTENT_FIELDS} together."
+        )
+    for field in fields:
+        _check_field_limits(field)
+        _check_select_options(field)
 
 
 # `NativeAction`, the steps and the blocks refer to each other: resolve now

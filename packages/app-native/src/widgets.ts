@@ -170,11 +170,11 @@ export type ActionInfoField = FieldBase & { type: 'info'; value?: string }
  */
 export type ActionPhotoField = FieldBase & {
   type: 'photo'
-  /** How many pictures at most, 1…10. Default 1. */
+  /** How many pictures at most, 1…10. Default 5. */
   max?: number
   /** Default `both`. */
   source?: 'camera' | 'library' | 'both'
-  /** Longest side in pixels after downscaling, default 2048, at most 4096. */
+  /** Longest side in pixels after downscaling, 256…4096, default 2048. */
   maxDimension?: number
 }
 /** Document scanner. Result: `NativeFileRef[]`. Needs `camera`. */
@@ -182,27 +182,48 @@ export type ActionScanField = FieldBase & {
   type: 'scan'
   /** `jpeg` (default): one file per page. `pdf`: one file. */
   format?: 'jpeg' | 'pdf'
+  /** How many pages at most, 1…20. Default 10. */
+  max?: number
 }
 /** Signature drawn with finger or pencil. Result: `NativeFileRef[]` with one PNG. */
 export type ActionSignatureField = FieldBase & { type: 'signature' }
+/** The symbologies a `barcode` field can be restricted to. */
+export type BarcodeSymbology =
+  | 'aztec'
+  | 'codabar'
+  | 'code39'
+  | 'code93'
+  | 'code128'
+  | 'dataMatrix'
+  | 'ean8'
+  | 'ean13'
+  | 'i2of5'
+  | 'itf14'
+  | 'pdf417'
+  | 'qr'
+  | 'upce'
+
 /** Text field with a button that scans a barcode/QR code. Needs `camera`. */
 export type ActionBarcodeField = FieldBase &
   TextRules & {
     type: 'barcode'
-    /** Restrict the scanner to these symbologies. */
-    symbologies?: string[]
+    /** Restrict the scanner to these symbologies. Default: all of them. */
+    symbologies?: BarcodeSymbology[]
     value?: string
   }
 
-/** The field types that can be used inside a `repeat` group. */
+/**
+ * The field types that can be used inside a `repeat` group. They cannot be
+ * conditional: no `visibleIf` inside a group.
+ */
 export type ActionRepeatInnerField =
-  | ActionTextField
-  | ActionNumberField
-  | ActionSelectField
-  | ActionToggleField
-  | ActionDateField
-  | ActionTextareaField
-  | ActionStepperField
+  | Omit<ActionTextField, 'visibleIf'>
+  | Omit<ActionNumberField, 'visibleIf'>
+  | Omit<ActionSelectField, 'visibleIf'>
+  | Omit<ActionToggleField, 'visibleIf'>
+  | Omit<ActionDateField, 'visibleIf'>
+  | Omit<ActionTextareaField, 'visibleIf'>
+  | Omit<ActionStepperField, 'visibleIf'>
 
 /**
  * Repeating group (for example order lines). Result: an array of objects, one per

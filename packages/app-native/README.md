@@ -138,24 +138,24 @@ own.
 
 ## Overview
 
-| Area            | Functions                                                                               | Capability                                                             |
-| --------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Detection       | `isNativeApp`, `nativeInfo`, `can`                                                      | –                                                                      |
-| Events          | `on('menuSelect' \| 'actionButtonTap' \| 'bottomBarTap' \| 'barcodeScanned', …)`        | –                                                                      |
-| Chrome          | `setChrome`, `centerProminentEntry`                                                     | `customChrome`, `customBottomBar`                                      |
-| Feedback        | `toast`, `haptic`, `setBadge`                                                           | –                                                                      |
-| System          | `share`, `openExternal`, `biometricConfirm`                                             | –                                                                      |
-| Camera          | `scanDocument`, `scanBarcode`                                                           | `camera`                                                               |
-| Widgets         | `setWidgets`, `updateWidget`, `removeWidgets`, `refreshWidgets`                         | `dashboardWidgets`                                                     |
-| Live Activities | `startLiveActivity`, `updateLiveActivity`, `endLiveActivity`, `getLiveActivities`       | `liveActivities`                                                       |
-| Approvals       | `refreshApprovals`                                                                      | `approvals`                                                            |
-| Sign-in         | `getAccessToken`                                                                        | `identity`                                                             |
-| Other apps      | `navigate`, `callPhone`, `addReminder`, `saveContact`, `toIsoWithOffset`                | `deviceApps` (reminder, contact)                                       |
-| Native forms    | `showForm`, `canShowNativeForms`, `formLimitWarnings`                                   | `nativeForms` (+ `camera` for camera fields)                           |
-| Native content  | `showContent`, `canShowNativeContent`, `contentLimitWarnings`                           | `nativeContent` (+ `deviceApps` for `saveContact`/`addReminder` steps) |
-| Surfaces        | `closeSurface`, `surfaceResult`, `isNativeSurfaceUnsupported`, `on('surfaceAction', …)` | `nativeForms` or `nativeContent`                                       |
-| Testing         | `sendTestNotification`                                                                  | `notifications`                                                        |
-| Raw access      | `call`, `post`, `send`                                                                  | –                                                                      |
+| Area            | Functions                                                                                                  | Capability                                                             |
+| --------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Detection       | `isNativeApp`, `nativeInfo`, `can`                                                                         | –                                                                      |
+| Events          | `on('menuSelect' \| 'actionButtonTap' \| 'bottomBarTap' \| 'barcodeScanned', …)`                           | –                                                                      |
+| Chrome          | `setChrome`, `centerProminentEntry`                                                                        | `customChrome`, `customBottomBar`                                      |
+| Feedback        | `toast`, `haptic`, `setBadge`                                                                              | –                                                                      |
+| System          | `share`, `openExternal`, `biometricConfirm`                                                                | –                                                                      |
+| Camera          | `scanDocument`, `scanBarcode`                                                                              | `camera`                                                               |
+| Widgets         | `setWidgets`, `updateWidget`, `removeWidgets`, `refreshWidgets`                                            | `dashboardWidgets`                                                     |
+| Live Activities | `startLiveActivity`, `updateLiveActivity`, `endLiveActivity`, `getLiveActivities`                          | `liveActivities`                                                       |
+| Approvals       | `refreshApprovals`                                                                                         | `approvals`                                                            |
+| Sign-in         | `getAccessToken`                                                                                           | `identity`                                                             |
+| Other apps      | `navigate`, `callPhone`, `addReminder`, `saveContact`, `toIsoWithOffset`                                   | `deviceApps` (reminder, contact)                                       |
+| Native forms    | `showForm`, `canShowNativeForms`, `formLimitWarnings`                                                      | `nativeForms` (+ `camera` for camera fields)                           |
+| Native content  | `showContent`, `canShowNativeContent`, `contentLimitWarnings`                                              | `nativeContent` (+ `deviceApps` for `saveContact`/`addReminder` steps) |
+| Surfaces        | `closeSurface`, `surfaceResult`, `isNativeSurfaceUnsupported`, `on('surfaceAction', …)`, `onSurfaceAction` | `nativeForms` or `nativeContent`                                       |
+| Testing         | `sendTestNotification`                                                                                     | `notifications`                                                        |
+| Raw access      | `call`, `post`, `send`                                                                                     | –                                                                      |
 
 ## License
 

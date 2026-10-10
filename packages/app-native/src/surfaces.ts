@@ -158,7 +158,11 @@ export type NativeThen =
   | { close: true }
   /** One of the device actions, with the same payload (see device-actions-guide.md). */
   | { device: NativeDeviceAction }
-  /** Chained flow: replaces the current surface with the next one (at most 5). */
+  /**
+   * Chained flow: replaces the current surface with the next one. At most 4 after
+   * the first (5 screens in a flow). Give the chained definition an explicit `id`
+   * if the page wants to answer a round trip of it (`onSurfaceAction`).
+   */
   | { showForm: NativeFormDef }
   | { showContent: NativeContentDef }
 
@@ -201,7 +205,7 @@ export type NativeListItem = {
   subtitle?: string
   trailing?: Value
   icon?: string
-  /** `https` URL or `data:image/…`. */
+  /** `https` URL. Not a `data:` URI: the app rejects those here. */
   image?: string
   action?: NativeAction
 }
@@ -221,7 +225,7 @@ export type NativeContentBlock =
       /** Paragraphs, lists, quotes, tables, bold/italic/links. No HTML. */
       markdown: string
       style?: 'body' | 'caption' | 'footnote'
-      align?: 'leading' | 'center'
+      align?: 'leading' | 'center' | 'trailing'
     }
   | {
       type: 'image'
@@ -319,16 +323,26 @@ export const NATIVE_SURFACE_LIMITS = {
   repeatRows: 50,
   /** `photo.max`. */
   photoMax: 10,
-  /** `photo.maxDimension`. */
+  /** `photo.maxDimension`, from and up to. */
+  photoMinDimension: 256,
   photoMaxDimension: 4096,
+  /** `scan.max`: pages. */
+  scanMaxPages: 20,
   contentBlocks: 100,
+  /** Levels of blocks, the top level counting as 1: card > card > text is fine. */
   contentNesting: 3,
+  /** Items of one `buttons` block. */
+  buttonsPerBlock: 6,
+  /** Fields of all `fields` blocks of one content screen together. */
+  contentFields: 60,
+  tableColumns: 20,
+  tableRows: 200,
   footerActions: 4,
   /** One inline `data:` image, in bytes. */
   inlineImageBytes: 1024 * 1024,
   inlineImagesTotalBytes: 4 * 1024 * 1024,
-  /** Chained surfaces after the first one. */
-  chainDepth: 5,
+  /** Chained surfaces after the first one: a flow has at most 5 screens in total. */
+  chainDepth: 4,
   /** One uploaded media file after downscaling, in bytes. */
   mediaFileBytes: 25 * 1024 * 1024,
   /** All media of one form, in bytes. */
@@ -379,10 +393,21 @@ function fieldWarnings(fields: NativeFormField[], where: string): string[] {
       }
       if (
         field.maxDimension !== undefined &&
-        field.maxDimension > NATIVE_SURFACE_LIMITS.photoMaxDimension
+        (field.maxDimension < NATIVE_SURFACE_LIMITS.photoMinDimension ||
+          field.maxDimension > NATIVE_SURFACE_LIMITS.photoMaxDimension)
       ) {
         warnings.push(
-          `${at}: photo maxDimension ${field.maxDimension} is above ${NATIVE_SURFACE_LIMITS.photoMaxDimension}.`
+          `${at}: photo maxDimension ${field.maxDimension} is outside ${NATIVE_SURFACE_LIMITS.photoMinDimension}…${NATIVE_SURFACE_LIMITS.photoMaxDimension}.`
+        )
+      }
+    }
+    if (field.type === 'scan') {
+      if (
+        field.max !== undefined &&
+        (field.max < 1 || field.max > NATIVE_SURFACE_LIMITS.scanMaxPages)
+      ) {
+        warnings.push(
+          `${at}: scan max ${field.max} is outside 1…${NATIVE_SURFACE_LIMITS.scanMaxPages} pages.`
         )
       }
     }
@@ -438,7 +463,15 @@ export function formLimitWarnings(def: NativeFormDef): string[] {
   return warnings
 }
 
-type ContentWalk = { blocks: number; images: number[]; maxDepth: number; warnings: string[] }
+type ContentWalk = {
+  blocks: number
+  images: number[]
+  /** Levels of nesting, the top level being 1. */
+  maxDepth: number
+  /** Fields of all `fields` blocks. */
+  fields: number
+  warnings: string[]
+}
 
 function walkBlocks(blocks: NativeContentBlock[], depth: number, where: string, walk: ContentWalk) {
   blocks.forEach((block, index) => {
@@ -455,7 +488,25 @@ function walkBlocks(blocks: NativeContentBlock[], depth: number, where: string, 
       }
     }
     if (block.type === 'fields') {
+      walk.fields += block.fields.length
       walk.warnings.push(...fieldWarnings(block.fields, `${at}.fields`))
+    }
+    if (block.type === 'buttons' && block.items.length > NATIVE_SURFACE_LIMITS.buttonsPerBlock) {
+      walk.warnings.push(
+        `${at}: ${block.items.length} buttons, the app takes at most ${NATIVE_SURFACE_LIMITS.buttonsPerBlock} in one block.`
+      )
+    }
+    if (block.type === 'table') {
+      if (block.columns.length > NATIVE_SURFACE_LIMITS.tableColumns) {
+        walk.warnings.push(
+          `${at}: ${block.columns.length} columns, the app takes at most ${NATIVE_SURFACE_LIMITS.tableColumns}.`
+        )
+      }
+      if (block.rows.length > NATIVE_SURFACE_LIMITS.tableRows) {
+        walk.warnings.push(
+          `${at}: ${block.rows.length} rows, the app takes at most ${NATIVE_SURFACE_LIMITS.tableRows}.`
+        )
+      }
     }
     if (block.type === 'card' || block.type === 'row') {
       walkBlocks(block.blocks, depth + 1, `${at}.blocks`, walk)
@@ -500,20 +551,25 @@ function contentActions(def: NativeContentDef): NativeAction[] {
  */
 export function contentLimitWarnings(def: NativeContentDef): string[] {
   const limits = NATIVE_SURFACE_LIMITS
-  const walk: ContentWalk = { blocks: 0, images: [], maxDepth: 0, warnings: [] }
+  const walk: ContentWalk = { blocks: 0, images: [], maxDepth: 0, fields: 0, warnings: [] }
   const bytes = definitionBytes(def)
   if (bytes > limits.definitionBytes) {
     walk.warnings.push(
       `The definition is ${bytes} bytes, the app takes at most ${limits.definitionBytes}.`
     )
   }
-  walkBlocks(def.blocks, 0, 'blocks', walk)
+  walkBlocks(def.blocks, 1, 'blocks', walk)
   if (walk.blocks > limits.contentBlocks) {
     walk.warnings.push(`${walk.blocks} blocks, the app takes at most ${limits.contentBlocks}.`)
   }
   if (walk.maxDepth > limits.contentNesting) {
     walk.warnings.push(
-      `Blocks are nested ${walk.maxDepth} deep, the app takes at most ${limits.contentNesting}.`
+      `Blocks are nested ${walk.maxDepth} levels deep, the app takes at most ${limits.contentNesting} (the top level counts as 1).`
+    )
+  }
+  if (walk.fields > limits.contentFields) {
+    walk.warnings.push(
+      `${walk.fields} fields in the \`fields\` blocks, the app takes at most ${limits.contentFields} together.`
     )
   }
   const total = walk.images.reduce((sum, size) => sum + size, 0)
@@ -529,7 +585,9 @@ export function contentLimitWarnings(def: NativeContentDef): string[] {
   }
   const chain = chainDepth(contentActions(def))
   if (chain > limits.chainDepth) {
-    walk.warnings.push(`${chain} chained surfaces, the app takes at most ${limits.chainDepth}.`)
+    walk.warnings.push(
+      `${chain} chained surfaces after the first one, the app takes at most ${limits.chainDepth} (${limits.chainDepth + 1} screens in a flow in total).`
+    )
   }
   return walk.warnings
 }
@@ -557,6 +615,8 @@ export type NativeSurfaceActionEvent = {
   /** `submit` for a form, otherwise the `id` of the tapped action. */
   action: string
   values?: NativeFormValues
+  /** The shown text of `search`/`select` fields by field id, as in the result. */
+  labels?: Record<string, string>
   context?: Record<string, unknown>
 }
 
@@ -590,6 +650,11 @@ export type SurfaceHandlerResult =
       then?: NativeThen[]
     }
 
+/** What the page's handler for a round trip looks like (`onAction`, `onSurfaceAction`). */
+export type SurfaceActionHandler = (
+  event: NativeSurfaceActionEvent
+) => SurfaceHandlerResult | Promise<SurfaceHandlerResult>
+
 export type ShowFormOptions = {
   /**
    * Called when the user submits (round trip). The form stays open with a spinner
@@ -610,15 +675,13 @@ export type ShowContentOptions = {
    * `wait` or `then` themselves are set to `wait: true`, so they arrive here.
    * Answer within 60 seconds; the return value works as for `onSubmit`.
    */
-  onAction?: (
-    event: NativeSurfaceActionEvent
-  ) => SurfaceHandlerResult | Promise<SurfaceHandlerResult>
+  onAction?: SurfaceActionHandler
   /** Warn about exceeded limits in the console. Default: in development builds only. */
   validate?: boolean
 }
 
 type HandlerEntry = {
-  handle: (event: NativeSurfaceActionEvent) => SurfaceHandlerResult | Promise<SurfaceHandlerResult>
+  handle: SurfaceActionHandler
   /** Counts the actions that arrived; an answer to an older one is dropped. */
   seen: number
 }
@@ -693,7 +756,7 @@ function newSurfaceId(): string {
 async function open<R extends NativeSurfaceResult>(
   action: 'showForm' | 'showContent',
   payload: NativeFormDef | NativeContentDef,
-  handler?: HandlerEntry['handle']
+  handler?: SurfaceActionHandler
 ): Promise<R> {
   if (typeof window === 'undefined' || !window.BMSNative) {
     return { ok: false, error: 'unavailable' } as R
@@ -707,12 +770,20 @@ async function open<R extends NativeSurfaceResult>(
       message: `A surface with the id "${id}" is already open.`,
     } as R
   }
-  const entry: HandlerEntry = { handle: handler, seen: 0 }
-  handlers.set(id, entry)
-  listen()
+  const unregister = register(id, handler)
   try {
     return (await call(action, payload)) as unknown as R
   } finally {
+    unregister()
+  }
+}
+
+/** Puts a handler into the registry; the returned function removes exactly this one. */
+function register(id: string, handle: SurfaceActionHandler): () => void {
+  const entry: HandlerEntry = { handle, seen: 0 }
+  handlers.set(id, entry)
+  listen()
+  return () => {
     if (handlers.get(id) === entry) handlers.delete(id)
   }
 }
@@ -801,6 +872,44 @@ export function showContent(
     ...(def.actions && { actions: def.actions.map(withWait) }),
   }
   return open<NativeContentResult>('showContent', payload, onAction)
+}
+
+/**
+ * Registers the page's handler for the round trip of the surface `id`, for the
+ * cases `showForm(…, { onSubmit })` and `showContent(…, { onAction })` do not
+ * cover: above all a **chained** surface, which has an `id` and a round trip of
+ * its own. The handler is answered like `onSubmit`/`onAction`: return nothing
+ * for success, `{ fieldErrors }` or throw to keep the surface open.
+ *
+ * ```ts
+ * const off = onSurfaceAction('reject-reason', async ({ values }) => {
+ *   await api.reject(order.id, values?.reason)
+ * })
+ * try {
+ *   await showContent({
+ *     id: 'order',
+ *     blocks: [...],
+ *     actions: [{
+ *       id: 'reject',
+ *       label: 'Reject',
+ *       then: [{ showForm: {
+ *         id: 'reject-reason', // an explicit id: the app generates one otherwise
+ *         submit: { wait: true }, // and the round trip is not switched on for you
+ *         fields: [{ id: 'reason', type: 'textarea', required: true }],
+ *       } }],
+ *     }],
+ *   })
+ * } finally {
+ *   off()
+ * }
+ * ```
+ *
+ * The handler stays until you call the returned function; a later registration
+ * for the same `id` replaces it. Outside the app nothing is registered.
+ */
+export function onSurfaceAction(id: string, handler: SurfaceActionHandler): () => void {
+  if (typeof window === 'undefined' || !window.BMSNative) return () => {}
+  return register(id, handler)
 }
 
 /**

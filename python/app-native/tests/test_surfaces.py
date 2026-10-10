@@ -7,28 +7,40 @@ import httpx
 import pytest
 from bmsdna.app_native import (
     MAX_BLOCK_NESTING,
+    MAX_BUTTONS_PER_BLOCK,
+    MAX_CHAIN_DEPTH,
     MAX_CONTENT_BLOCKS,
+    MAX_CONTENT_FIELDS,
     MAX_FIELD_OPTIONS,
     MAX_FORM_FIELDS,
     MAX_FORM_PAGES,
     MAX_INLINE_IMAGE_BYTES,
     MAX_SURFACE_DEFINITION_BYTES,
+    MAX_TABLE_COLUMNS,
+    MAX_TABLE_ROWS,
+    ActionButton,
+    ActionData,
     ActionField,
     ActionOption,
     ActionPage,
+    BadgesBlock,
     ButtonsBlock,
     CardBlock,
     CloseStep,
     CopyStep,
     DeviceStep,
     DividerBlock,
+    FactsBlock,
+    FieldsBlock,
     HeadingBlock,
     ImageBlock,
     NativeAction,
     NativeContent,
     NativeForm,
     NativeFormSubmit,
+    NativeListItem,
     OpenUrlStep,
+    RowBlock,
     ShowContentStep,
     ShowFormStep,
     TableBlock,
@@ -44,12 +56,15 @@ def _field(i: int, **overrides: Any) -> ActionField:
     return ActionField(id=f"f{i}", **overrides)
 
 
-def _nested_cards(depth: int) -> dict[str, Any]:
-    """A card inside a card inside ... `depth` cards deep, with a divider inside."""
+def _leaf_at(level: int) -> dict[str, Any]:
+    """A divider at `level`, the top level counting as 1: `level - 1` cards around it."""
     block: dict[str, Any] = {"type": "divider"}
-    for _ in range(depth):
+    for _ in range(level - 1):
         block = {"type": "card", "blocks": [block]}
     return block
+
+
+DIVIDER = {"type": "divider"}
 
 
 # --- forms ---------------------------------------------------------------
@@ -219,7 +234,7 @@ def test_content_parses_blocks_by_type() -> None:
         {
             "blocks": [
                 {"type": "kpi", "data": {"value": 12, "unit": "pcs"}},
-                {"type": "card", "blocks": [{"type": "row", "blocks": [{"type": "divider"}]}]},
+                {"type": "card", "blocks": [{"type": "row", "blocks": [DIVIDER, DIVIDER]}]},
             ]
         }
     )
@@ -235,18 +250,20 @@ def test_content_rejects_an_unknown_block_type() -> None:
 
 
 def test_content_limits() -> None:
-    NativeContent.model_validate({"blocks": [_nested_cards(MAX_BLOCK_NESTING)]})
+    # card > card > divider is fine, card > card > card > divider is too deep.
+    assert MAX_BLOCK_NESTING == 3
+    NativeContent.model_validate({"blocks": [_leaf_at(MAX_BLOCK_NESTING)]})
     with pytest.raises(ValidationError, match="nested"):
-        NativeContent.model_validate({"blocks": [_nested_cards(MAX_BLOCK_NESTING + 1)]})
+        NativeContent.model_validate({"blocks": [_leaf_at(MAX_BLOCK_NESTING + 1)]})
 
     NativeContent(blocks=[DividerBlock()] * MAX_CONTENT_BLOCKS)
     with pytest.raises(ValidationError, match="blocks"):
         NativeContent(blocks=[DividerBlock()] * (MAX_CONTENT_BLOCKS + 1))
 
     actions = [NativeAction(id=f"a{i}", label="A") for i in range(5)]
-    NativeContent(blocks=[], actions=actions[:4])
+    NativeContent(blocks=[DividerBlock()], actions=actions[:4])
     with pytest.raises(ValidationError, match="footer"):
-        NativeContent(blocks=[], actions=actions)
+        NativeContent(blocks=[DividerBlock()], actions=actions)
 
 
 def test_nested_blocks_count_towards_the_block_limit() -> None:
@@ -305,7 +322,7 @@ def test_follow_up_steps() -> None:
                 {"close": True},
                 {"device": {"action": "callPhone", "number": "+41 44 000 00 00"}},
                 {"showForm": {"fields": [{"id": "reason"}]}},
-                {"showContent": {"blocks": []}},
+                {"showContent": {"blocks": [DIVIDER]}},
             ],
         }
     )
@@ -338,18 +355,21 @@ def test_follow_up_step_rejects(step: dict[str, Any]) -> None:
 
 
 def test_chain_depth_is_limited() -> None:
-    def chain(length: int) -> dict[str, Any]:
-        content: dict[str, Any] = {"blocks": []}
-        for _ in range(length):
+    def chain(chained: int) -> dict[str, Any]:
+        """`chained` surfaces after the first one."""
+        content: dict[str, Any] = {"blocks": [DIVIDER]}
+        for _ in range(chained):
             content = {
-                "blocks": [],
+                "blocks": [DIVIDER],
                 "actions": [{"id": "n", "label": "Next", "then": [{"showContent": content}]}],
             }
         return content
 
-    NativeContent.model_validate(chain(5))
+    # At most 5 screens in a flow: the first and 4 chained ones.
+    assert MAX_CHAIN_DEPTH == 4
+    NativeContent.model_validate(chain(4))
     with pytest.raises(ValidationError, match="chained"):
-        NativeContent.model_validate(chain(6))
+        NativeContent.model_validate(chain(5))
 
 
 # --- as an endpoint --------------------------------------------------------
@@ -390,3 +410,152 @@ async def test_a_form_can_be_served_from_an_endpoint_and_passed_on_unchanged() -
         ],
         "submit": {"wait": True},
     }
+
+
+# --- what the app rejects with `invalid` --------------------------------------
+
+
+def test_text_align_can_be_trailing() -> None:
+    block = TextBlock(markdown="Total", align="trailing")
+    assert block.model_dump(mode="json", by_alias=True, exclude_none=True)["align"] == "trailing"
+    with pytest.raises(ValidationError):
+        TextBlock.model_validate({"markdown": "x", "align": "justify"})
+
+
+def test_list_item_images_are_https_urls() -> None:
+    NativeListItem(title="Beat", image="https://example.com/beat.jpg")
+    with pytest.raises(ValidationError, match="https"):
+        NativeListItem(title="Beat", image="data:image/png;base64,iVBORw0KGgo=")
+    with pytest.raises(ValidationError, match="https"):
+        NativeListItem(title="Beat", image="http://example.com/beat.jpg")
+
+
+def test_item_lists_are_not_empty() -> None:
+    for block in ({"type": "facts"}, {"type": "list"}, {"type": "badges"}, {"type": "buttons"}):
+        with pytest.raises(ValidationError):
+            NativeContent.model_validate({"blocks": [{**block, "items": []}]})
+    FactsBlock.model_validate({"items": [{"label": "A", "value": "B"}]})
+    BadgesBlock.model_validate({"items": [{"text": "A"}]})
+
+
+def test_buttons_block_has_at_most_6_items() -> None:
+    def items(n: int) -> list[dict[str, str]]:
+        return [{"id": f"b{i}", "label": "B"} for i in range(n)]
+
+    assert MAX_BUTTONS_PER_BLOCK == 6
+    ButtonsBlock.model_validate({"items": items(6)})
+    with pytest.raises(ValidationError):
+        ButtonsBlock.model_validate({"items": items(7)})
+
+
+def test_row_has_two_or_three_blocks_and_card_at_least_one() -> None:
+    for count, valid in ((1, False), (2, True), (3, True), (4, False)):
+        blocks = [DIVIDER] * count
+        if valid:
+            RowBlock.model_validate({"blocks": blocks})
+        else:
+            with pytest.raises(ValidationError):
+                RowBlock.model_validate({"blocks": blocks})
+    CardBlock.model_validate({"blocks": [DIVIDER]})
+    with pytest.raises(ValidationError):
+        CardBlock.model_validate({"blocks": []})
+
+
+def test_content_needs_at_least_one_block() -> None:
+    with pytest.raises(ValidationError):
+        NativeContent(blocks=[])
+    with pytest.raises(ValidationError):  # also a chained one
+        NativeContent.model_validate(
+            {
+                "blocks": [DIVIDER],
+                "actions": [{"id": "a", "label": "A", "then": [{"showContent": {"blocks": []}}]}],
+            }
+        )
+
+
+def test_table_has_at_most_20_columns_and_200_rows() -> None:
+    def table(columns: int, rows: int) -> dict[str, Any]:
+        return {
+            "columns": [{"key": f"c{i}", "label": "C"} for i in range(columns)],
+            "rows": [{"c0": 1}] * rows,
+        }
+
+    assert (MAX_TABLE_COLUMNS, MAX_TABLE_ROWS) == (20, 200)
+    TableBlock.model_validate(table(20, 200))
+    with pytest.raises(ValidationError):
+        TableBlock.model_validate(table(21, 1))
+    with pytest.raises(ValidationError):
+        TableBlock.model_validate(table(1, 201))
+
+
+def test_fields_blocks_have_at_most_60_fields_together() -> None:
+    def fields(start: int, count: int) -> dict[str, Any]:
+        return {
+            "type": "fields",
+            "fields": [{"id": f"f{start + i}"} for i in range(count)],
+        }
+
+    assert MAX_CONTENT_FIELDS == 60
+    NativeContent.model_validate({"blocks": [fields(0, 30), fields(30, 30)]})
+    with pytest.raises(ValidationError, match="together"):
+        NativeContent.model_validate(
+            {"blocks": [fields(0, 30), {"type": "card", "blocks": [fields(30, 31)]}]}
+        )
+    assert FieldsBlock.model_validate(fields(0, 1)).fields[0].id == "f0"
+
+
+def test_photo_dimension_is_256_to_4096_and_the_default_count_is_the_apps() -> None:
+    ActionField(id="card", type="photo", max_dimension=256)
+    ActionField(id="card", type="photo", max_dimension=4096)
+    for outside in (255, 4097):
+        with pytest.raises(ValidationError):
+            ActionField(id="card", type="photo", max_dimension=outside)
+
+
+def test_scan_has_1_to_20_pages() -> None:
+    field = ActionField(id="doc", type="scan", format="pdf", max=20)
+    assert field.max == 20
+    for outside in (0, 21):
+        with pytest.raises(ValidationError, match="1 to 20"):
+            ActionField(id="doc", type="scan", max=outside)
+
+
+def test_barcode_symbologies_are_the_scanners_names() -> None:
+    names = [
+        "aztec", "codabar", "code39", "code93", "code128", "dataMatrix", "ean8", "ean13",
+        "i2of5", "itf14", "pdf417", "qr", "upce",
+    ]  # fmt: skip
+    field = ActionField.model_validate({"id": "gln", "type": "barcode", "symbologies": names})
+    assert field.symbologies == names
+    with pytest.raises(ValidationError):
+        ActionField.model_validate({"id": "gln", "type": "barcode", "symbologies": ["ean-13"]})
+
+
+def test_repeat_rows_cannot_be_conditional() -> None:
+    inner = ActionField.model_validate(
+        {"id": "reason", "visibleIf": {"field": "express", "equals": True}}
+    )
+    with pytest.raises(ValidationError, match="visible_if"):
+        ActionField(id="lines", type="repeat", fields=[inner])
+
+
+def test_select_needs_options_or_remote_in_a_native_form() -> None:
+    NativeForm(fields=[ActionField(id="kind", type="select", options=[ActionOption(value="a")])])
+    NativeForm(fields=[ActionField(id="owner", type="select", remote=True)])
+    with pytest.raises(ValidationError, match="needs `options`"):
+        NativeForm(fields=[ActionField(id="kind", type="select")])
+    with pytest.raises(ValidationError, match="needs `options`"):  # also inside a repeat group
+        NativeForm(
+            fields=[
+                ActionField(
+                    id="lines", type="repeat", fields=[ActionField(id="kind", type="select")]
+                )
+            ]
+        )
+    with pytest.raises(ValidationError, match="needs `options`"):  # and in a fields block
+        NativeContent(blocks=[FieldsBlock(fields=[ActionField(id="kind", type="select")])])
+    # Widget forms keep accepting it: they are not native forms.
+    assert ActionData(
+        fields=[ActionField(id="kind", type="select")],
+        buttons=[ActionButton(id="go", label="Go")],
+    )

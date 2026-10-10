@@ -305,7 +305,7 @@ const nativeForm: NativeFormDef = {
           source: 'both',
           maxDimension: 2048,
         },
-        { id: 'contract', type: 'scan', label: 'Contract', format: 'pdf' },
+        { id: 'contract', type: 'scan', label: 'Contract', format: 'pdf', max: 5 },
         { id: 'signature', type: 'signature', label: 'Signature', required: true },
         { id: 'gln', type: 'barcode', label: 'GLN', symbologies: ['ean13', 'qr'] },
         {
@@ -377,6 +377,7 @@ const nativeContent: NativeContentDef = {
       style: 'body',
       align: 'leading',
     },
+    { type: 'text', markdown: 'Updated today', style: 'footnote', align: 'trailing' },
     {
       type: 'callout',
       style: 'warning',
