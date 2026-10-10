@@ -7,26 +7,275 @@
       // Like the app (WebView.nativeEnvironmentScript): set up BMSNative before
       // any page script — here forwarding to the test harness.
       if (!new URLSearchParams(location.search).has('browser')) {
+        const params = new URLSearchParams(location.search)
         const send = (message) =>
           fetch('/native/' + message.action, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(message),
           }).then((r) => r.json())
+
+        // `?capabilities=a,b` replaces the list, like a web app without the
+        // capability (an empty value: none at all).
+        const capabilities = params.has('capabilities')
+          ? params.get('capabilities').split(',').filter(Boolean)
+          : [
+              'customChrome',
+              'dashboardWidgets',
+              'liveActivities',
+              'identity',
+              'deviceApps',
+              'camera',
+              'nativeForms',
+              'nativeContent',
+            ]
+
+        // --- Native surfaces -------------------------------------------------
+        // A stand-in for the app's native sheets. Tests push what "the user"
+        // does onto `window.__surfaces.script`, one entry per surface:
+        //
+        //   { error: 'cancelled' | 'unknownAction' | … }   the app answers with this error
+        //   { dismiss: true }                              the user dismisses the surface
+        //   { submit: [attempt, …] }                       a form: the user submits, and
+        //                                                  again after a field error
+        //   { action: 'id', values? }                      content: the user taps an action
+        //   { hold: true }                                 the surface stays open (for busy)
+        //
+        //   attempt = { values, labels?, uploads?: [{ key, field, name, mime, content }],
+        //               lookups?: [{ field, query }] }
+        //
+        // Like the app it uploads media to the document router before it answers
+        // the page, remembers what is uploaded across attempts, calls
+        // `window.onNativeSurfaceAction` when the form says `wait`, and takes the
+        // page's `surfaceResult`. It checks capabilities, one surface at a time,
+        // and answers `unavailable` when the page has no callback.
+        const surfaces = {
+          script: [],
+          open: null, // id of the open surface
+          waiting: null, // { id, resolve } while the page owes an answer
+          held: null, // resolves the surface that was told to `hold`
+          counter: 0,
+          events: [], // what the page was called with (onNativeSurfaceAction)
+          lookups: [], // answers of the option lookups
+          steps: [], // `then` steps the app ran itself (openPath, copy, …)
+        }
+        window.__surfaces = surfaces
+
+        const failure = (error, message) => ({ ok: false, error, ...(message && { message }) })
+
+        async function upload(id, def, up, state) {
+          if (state.uploaded[up.key]) return state.uploaded[up.key]
+          const uploadId = state.ids[up.key] || (state.ids[up.key] = crypto.randomUUID())
+          const body = new FormData()
+          body.set('device_id', 'e2e-device')
+          body.set('user_email', 'anna@example.com')
+          body.set('kind', 'form')
+          body.set('upload_id', uploadId)
+          body.set('form_id', id)
+          body.set('field_id', up.field)
+          if (def.context) body.set('context', JSON.stringify(def.context))
+          const blob = new Blob([up.content], { type: up.mime })
+          body.set('file', blob, up.name)
+          // `repeat`: the app retried after a failed attempt — the same upload_id again.
+          let response
+          for (let i = 0; i < (up.times || 1); i++) {
+            response = await fetch('/api/documents', { method: 'POST', body })
+          }
+          if (!response.ok) return null
+          const answer = await response.json()
+          const ref = {
+            name: up.name,
+            mime: up.mime,
+            size: blob.size,
+            ref: String(answer.id ?? uploadId),
+          }
+          state.uploaded[up.key] = ref
+          return ref
+        }
+
+        async function lookup(id, def, values, spec) {
+          const response = await fetch('/api/widget-options', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              device_id: 'e2e-device',
+              form_id: id,
+              field_id: spec.field,
+              query: spec.query,
+              values,
+              ...(def.context && { context: def.context }),
+              user_email: 'anna@example.com',
+            }),
+          })
+          surfaces.lookups.push({ status: response.status, body: await response.json() })
+        }
+
+        function callPage(id, event) {
+          if (typeof window.onNativeSurfaceAction !== 'function') return null
+          const answered = new Promise((resolve) => (surfaces.waiting = { id, resolve }))
+          surfaces.events.push(event)
+          window.onNativeSurfaceAction(event)
+          return answered
+        }
+
+        async function runThen(steps) {
+          let next
+          for (const step of steps) {
+            // A chained surface replaces the open one (same sheet): not `busy`.
+            if (step.showForm) next = await present('showForm', step.showForm, true)
+            else if (step.showContent) next = await present('showContent', step.showContent, true)
+            else surfaces.steps.push(step)
+          }
+          return next
+        }
+
+        function findAction(def, actionId) {
+          const found = []
+          const visit = (blocks) =>
+            blocks.forEach((b) => {
+              if (b.type === 'buttons') found.push(...b.items)
+              if (b.type === 'list') b.items.forEach((i) => i.action && found.push(i.action))
+              if (b.blocks) visit(b.blocks)
+            })
+          visit(def.blocks || [])
+          return [...(def.actions || []), ...found].find((a) => a.id === actionId)
+        }
+
+        async function submitForm(id, def, behavior) {
+          const state = { uploaded: {}, ids: {} }
+          for (const attempt of behavior.submit) {
+            const values = { ...attempt.values }
+            for (const up of attempt.uploads || []) {
+              const ref = await upload(id, def, up, state)
+              if (!ref) return failure('failed', 'Upload failed')
+              values[up.field] = [...(values[up.field] || []).filter((r) => r.ref !== ref.ref), ref]
+            }
+            for (const spec of attempt.lookups || []) await lookup(id, def, values, spec)
+            const labels = attempt.labels || {}
+            if (!def.submit || !def.submit.wait) {
+              return {
+                ok: true,
+                id,
+                action: 'submit',
+                values,
+                labels,
+                ...(def.context && { context: def.context }),
+              }
+            }
+            const answered = callPage(id, { id, action: 'submit', values, context: def.context })
+            if (!answered)
+              return failure('unavailable', 'window.onNativeSurfaceAction is not defined')
+            const reply = await answered
+            if (reply.closed) return failure('cancelled')
+            if (!reply.ok) continue // stays open; the user corrects and submits again
+            const result = { ok: true, id, action: 'submit', values, labels }
+            if (def.context) result.context = def.context
+            if (reply.then && reply.then.length) {
+              const next = await runThen(reply.then)
+              if (next) result.next = next
+            }
+            return result
+          }
+          return failure('cancelled') // the user gave up
+        }
+
+        async function tapAction(id, def, behavior) {
+          const action = findAction(def, behavior.action)
+          const result = { ok: true, id, action: behavior.action }
+          if (behavior.values) result.values = behavior.values
+          if (action && action.wait) {
+            const answered = callPage(id, {
+              id,
+              action: behavior.action,
+              values: behavior.values,
+              context: def.context,
+            })
+            if (!answered)
+              return failure('unavailable', 'window.onNativeSurfaceAction is not defined')
+            const reply = await answered
+            if (reply.closed) return failure('cancelled')
+            if (!reply.ok) return failure('failed', reply.message)
+            if (reply.then && reply.then.length) {
+              const next = await runThen(reply.then)
+              if (next) result.next = next
+            }
+          } else if (action && action.then) {
+            const next = await runThen(action.then)
+            if (next) result.next = next
+          }
+          if (def.context) result.context = def.context
+          return result
+        }
+
+        async function present(action, def, chained = false) {
+          const needed = action === 'showForm' ? 'nativeForms' : 'nativeContent'
+          if (!capabilities.includes(needed)) {
+            return failure('capability', `The web app lacks the capability ${needed}.`)
+          }
+          if (surfaces.open && !chained) {
+            return failure('busy', 'A surface of this web app is already open.')
+          }
+          const behavior = surfaces.script.shift() || { dismiss: true }
+          if (behavior.error) return failure(behavior.error, behavior.message)
+          const id = def.id || 'surface-' + ++surfaces.counter
+          surfaces.open = id
+          try {
+            if (behavior.hold) {
+              return await new Promise((resolve) => (surfaces.held = resolve))
+            }
+            if (behavior.dismiss) {
+              return action === 'showForm'
+                ? failure('cancelled')
+                : { ok: true, id, action: 'dismiss' }
+            }
+            return action === 'showForm'
+              ? await submitForm(id, def, behavior)
+              : await tapAction(id, def, behavior)
+          } finally {
+            surfaces.open = null
+            surfaces.waiting = null
+            surfaces.held = null
+          }
+        }
+
+        async function call(action, payload) {
+          // Every message goes to the harness: it logs it and validates the
+          // definitions with the Pydantic models.
+          const answer = await send({ ...(payload || {}), action })
+          if (action === 'showForm' || action === 'showContent') {
+            return answer.ok ? present(action, payload || {}) : answer
+          }
+          if (action === 'closeSurface' || action === 'surfaceResult') {
+            if (!capabilities.includes('nativeForms') && !capabilities.includes('nativeContent')) {
+              return failure('capability', 'No surface capability.')
+            }
+            if (action === 'closeSurface') {
+              const open = surfaces.open
+              if (open && (!payload || !payload.id || payload.id === open)) {
+                if (surfaces.waiting) surfaces.waiting.resolve({ closed: true })
+                else if (surfaces.held) surfaces.held(failure('cancelled'))
+              }
+              return { ok: true }
+            }
+            const waiting = surfaces.waiting
+            if (!waiting || waiting.id !== (payload || {}).id) {
+              return failure('invalid', 'No surface is waiting for an answer.')
+            }
+            surfaces.waiting = null
+            waiting.resolve(payload)
+            return { ok: true }
+          }
+          return answer
+        }
+
         window.BMSNative = Object.freeze({
           isNativeApp: true,
           platform: 'ios',
           appVersion: 'e2e',
           webAppId: 'e2e',
-          capabilities: [
-            'customChrome',
-            'dashboardWidgets',
-            'liveActivities',
-            'identity',
-            'deviceApps',
-          ],
+          capabilities,
           postMessage: (message) => void send(message),
-          call: (action, payload) => send({ ...(payload || {}), action }),
+          call: (action, payload) => call(action, payload),
         })
       }
     </script>
