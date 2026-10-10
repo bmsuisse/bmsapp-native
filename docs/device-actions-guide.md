@@ -200,6 +200,30 @@ Do not use `date.toISOString().slice(0, 10)` for an all-day reminder: that is th
 **UTC** date and is one day off in the early morning (00:30 in Zurich is still
 the day before in UTC).
 
+## In native content: `then`
+
+The four actions also run as a follow-up step of an action in native content
+(`showContent`, see [native-surfaces-guide.md](native-surfaces-guide.md)), with
+the same payload and the same capabilities (`saveContact` and `addReminder`
+need `deviceApps`):
+
+```ts
+await showContent({
+  title: 'Miller Ltd',
+  blocks: [{ type: 'text', markdown: 'Industriestrasse 5, 4600 Olten' }],
+  actions: [
+    {
+      id: 'route',
+      label: 'Route',
+      icon: 'location',
+      then: [
+        { device: { action: 'navigate', destination: { address: 'Industriestrasse 5, Olten' } } },
+      ],
+    },
+  ],
+})
+```
+
 ## Outside the app
 
 The same page also runs in a normal browser, so the functions fall back:

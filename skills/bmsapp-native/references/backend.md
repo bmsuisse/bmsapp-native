@@ -25,9 +25,10 @@ Full documentation: `python/app-native/README.md` in the bmsapp-native repo.
 | Silent push                     | `send_silent_push(...)`                                                                                                          |
 | Urgent/critical                 | `send_critical_alert(...)`                                                                                                       |
 | Clean up dead tokens            | `PERMANENTLY_INVALID_TOKEN_REASONS`                                                                                              |
-| Receive scans                   | `create_document_router(...)`                                                                                                    |
+| Receive scans, media of forms   | `create_document_router(...)` (callback may return a reference), `resolve_file_refs`, `NativeFileRef`                            |
 | Receive push buttons            | `create_notification_action_router(...)`                                                                                         |
 | Dashboard widgets               | `create_widget_feed_router`, `create_widget_action_router`, `create_widget_options_router`, `send_widget_update`, `dump_widgets` |
+| Native forms and content        | `NativeForm`, `NativeContent` (serve a definition), `create_widget_options_router` (`form_id`, `context`), `dump_native_form`    |
 | Live Activities                 | `create_live_activity_router`, `send_live_activity_start/update/end`                                                             |
 | Approvals                       | `create_approvals_router`, `send_approvals_update`                                                                               |
 | Sign-in with the app's token    | `EntraTokenVerifier`, `create_entra_auth_dependency`, `SignedSessionCookie`, `bearer_token`                                      |

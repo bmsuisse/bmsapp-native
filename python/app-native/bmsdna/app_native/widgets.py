@@ -17,6 +17,8 @@ Buttons in widgets arrive as `POST <prefix>/widget-actions` in
 `create_widget_action_router`. The response can update the widget
 immediately. Search fields and lazily loaded select fields in forms fetch
 their options via `POST <prefix>/widget-options` (`create_widget_options_router`).
+The same endpoint serves the native forms that a web page opens itself
+(`surfaces.py`): the request then carries `form_id` instead of `widget_id`.
 
 The format is the same in all three cases (schema v1, see
 `docs/dashboard-widgets-guide.md`). The models here validate it so that
@@ -201,16 +203,68 @@ class ActionCondition(_CamelModel):
     equals: ConditionValue | list[ConditionValue] | None = None
 
 
+ActionFieldType = Literal[
+    "text",
+    "number",
+    "select",
+    "toggle",
+    "date",
+    "search",
+    "textarea",
+    "email",
+    "phone",
+    "url",
+    "multiselect",
+    "segmented",
+    "stepper",
+    "time",
+    "datetime",
+    "info",
+    "photo",
+    "scan",
+    "signature",
+    "barcode",
+    "repeat",
+]
+"""The field types of a form, in widgets and in native forms. An older app
+shows a type it does not know as `text`."""
+
+#: The field types allowed inside a `repeat` group.
+REPEAT_INNER_FIELD_TYPES = frozenset(
+    {"text", "number", "select", "toggle", "date", "textarea", "stepper"}
+)
+
+#: `photo.max` is 1 to this value.
+MAX_PHOTOS_PER_FIELD = 10
+#: `photo.max_dimension` is at most this many pixels.
+MAX_PHOTO_DIMENSION = 4096
+#: `repeat.max` is at most this many rows.
+MAX_REPEAT_ROWS = 50
+
+Number = int | float
+
+
 class ActionField(_CamelModel):
+    """A form field of an `action` widget or of a native form (`NativeForm`).
+
+    One flat model for all types; which properties apply to which type is
+    described per property, and the validator rejects what cannot work
+    (a `repeat` without `fields`, `photo.max` of 11, ...).
+    """
+
     id: str = Field(min_length=1)
     #: `search` is a search field whose results the app fetches from your
     #: backend while typing, via `create_widget_options_router` (Meilisearch,
     #: SQL, whatever you have). The `value` of the selected result is
-    #: submitted.
-    type: Literal["text", "number", "select", "toggle", "date", "search"] = "text"
+    #: submitted. The media types `photo`, `scan` and `signature` give
+    #: `NativeFileRef`s in native forms, `repeat` an array of objects.
+    type: ActionFieldType = "text"
     label: str | None = None
     placeholder: str | None = None
-    #: Fixed choices for `select`. Ignored with `remote=True` or `search`.
+    #: Footnote under the field.
+    help: str | None = None
+    #: Fixed choices for `select`, `multiselect` and `segmented`. Ignored with
+    #: `remote=True` or `search`.
     options: list[ActionOption] | None = None
     #: `select` only: load the options via `create_widget_options_router`
     #: when the field is shown (with `query=""` and the values entered so
@@ -226,12 +280,82 @@ class ActionField(_CamelModel):
     #: fields are never required and are not included in `values`. If a
     #: page has no visible field, the app skips it.
     visible_if: ActionCondition | None = None
-    #: Prefilled value. Date fields expect "YYYY-MM-DD", search and
-    #: select fields the `value` of an option.
-    value: str | float | bool | None = None
+    #: Prefilled value. Date fields expect "YYYY-MM-DD", `time` "HH:mm",
+    #: `datetime` "YYYY-MM-DDTHH:mm" (device-local), search and select fields
+    #: the `value` of an option, `multiselect` a list of them.
+    value: str | float | bool | list[str] | list[dict[str, Any]] | None = None
     #: `search`/`select` with `remote` only: display text for the prefilled
     #: `value`, as long as nothing has been loaded yet.
     value_label: str | None = None
+    #: Text fields (`text`, `textarea`, `email`, `phone`, `url`, `barcode`):
+    #: length limits.
+    min_length: int | None = Field(default=None, ge=0)
+    max_length: int | None = Field(default=None, ge=1)
+    #: `number` and `stepper`: bounds. `photo`: the number of pictures
+    #: (`max`, 1 to 10). `repeat`: the number of rows (`min`, `max` up to 50).
+    min: Number | None = None
+    max: Number | None = None
+    #: `stepper` only: the step, default 1.
+    step: int | None = Field(default=None, ge=1)
+    #: Text fields: regular expression the whole input has to match, and the
+    #: text shown when it does not. (The app uses ICU regular expressions,
+    #: so the pattern is not checked here.)
+    pattern: str | None = None
+    pattern_message: str | None = None
+    #: `photo` only. Default in the app: `both`.
+    source: Literal["camera", "library", "both"] | None = None
+    #: `photo` only: longest side in pixels after downscaling. Default 2048.
+    max_dimension: int | None = Field(default=None, ge=1, le=MAX_PHOTO_DIMENSION)
+    #: `scan` only: `jpeg` (default, one file per page) or `pdf` (one file).
+    format: Literal["jpeg", "pdf"] | None = None
+    #: `barcode` only: restrict the scanner to these symbologies.
+    symbologies: list[str] | None = None
+    #: `repeat` only: the fields of one row. Only `text`, `number`, `select`,
+    #: `toggle`, `date`, `textarea` and `stepper`; no nested `repeat`.
+    fields: list[ActionField] | None = None
+    #: `repeat` only: label of the "add row" button.
+    add_label: str | None = None
+
+    @model_validator(mode="after")
+    def _check_type_specific(self) -> ActionField:
+        if self.type == "repeat":
+            _check_repeat(self)
+        elif self.fields is not None:
+            raise ValueError(f"`{self.id}`: `fields` only belongs to the type `repeat`.")
+        if self.type in ("multiselect", "segmented") and not self.options:
+            raise ValueError(f"`{self.id}`: type `{self.type}` needs `options`.")
+        photo_count_out_of_range = (
+            self.type == "photo"
+            and self.max is not None
+            and not 1 <= self.max <= MAX_PHOTOS_PER_FIELD
+        )
+        if photo_count_out_of_range:
+            raise ValueError(f"`{self.id}`: `max` of a `photo` is 1 to {MAX_PHOTOS_PER_FIELD}.")
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError(f"`{self.id}`: `min` is greater than `max`.")
+        if (
+            self.min_length is not None
+            and self.max_length is not None
+            and self.min_length > self.max_length
+        ):
+            raise ValueError(f"`{self.id}`: `min_length` is greater than `max_length`.")
+        return self
+
+
+def _check_repeat(field: ActionField) -> None:
+    if not field.fields:
+        raise ValueError(f"`{field.id}`: a `repeat` group needs `fields`.")
+    for inner in field.fields:
+        if inner.type not in REPEAT_INNER_FIELD_TYPES:
+            raise ValueError(
+                f"`{field.id}`: a `repeat` group cannot contain the type `{inner.type}` "
+                f"(`{inner.id}`). Allowed: {', '.join(sorted(REPEAT_INNER_FIELD_TYPES))}."
+            )
+    inner_ids = [inner.id for inner in field.fields]
+    if len(inner_ids) != len(set(inner_ids)):
+        raise ValueError(f"`{field.id}`: the `id`s inside a `repeat` group must be unique.")
+    if field.max is not None and field.max > MAX_REPEAT_ROWS:
+        raise ValueError(f"`{field.id}`: a `repeat` group has at most {MAX_REPEAT_ROWS} rows.")
 
 
 class ActionPage(_CamelModel):
@@ -258,16 +382,25 @@ class ActionData(_CamelModel):
     def _fields_or_pages(self) -> ActionData:
         if self.fields and self.pages:
             raise ValueError("Specify either `fields` or `pages`, not both.")
-        all_fields = [f for page in self.pages or [] for f in page.fields] + list(self.fields or [])
-        ids = [f.id for f in all_fields]
-        if len(ids) != len(set(ids)):
-            raise ValueError("Field `id`s must be unique across all pages.")
-        for f in all_fields:
-            if f.visible_if and (f.visible_if.field == f.id or f.visible_if.field not in ids):
-                raise ValueError(
-                    f"`visible_if` of `{f.id}` does not refer to another field of this form."
-                )
+        check_form_fields(self.fields, self.pages)
         return self
+
+
+def check_form_fields(
+    fields: Sequence[ActionField] | None, pages: Sequence[ActionPage] | None
+) -> None:
+    """Checks what widget forms and native forms have in common: the field
+    `id`s are unique across all pages, and every `visible_if` refers to
+    another field of the same form. Raises `ValueError`."""
+    all_fields = [f for page in pages or [] for f in page.fields] + list(fields or [])
+    ids = [f.id for f in all_fields]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Field `id`s must be unique across all pages.")
+    for f in all_fields:
+        if f.visible_if and (f.visible_if.field == f.id or f.visible_if.field not in ids):
+            raise ValueError(
+                f"`visible_if` of `{f.id}` does not refer to another field of this form."
+            )
 
 
 # --- Widgets --------------------------------------------------------------
@@ -474,10 +607,20 @@ class WidgetActionResult(_CamelModel):
 
 class WidgetOptionsRequest(BaseModel):
     """Payload of `POST <prefix>/widget-options`: the app wants options for
-    a search field or lazily loaded select field of an `action` widget."""
+    a search field or lazily loaded select field of an `action` widget, or of
+    a native form that a web page opened (`showForm`).
+
+    Exactly one of `widget_id` (widget form) and `form_id` (native form) is
+    set. Existing callbacks that only look at `widget_id` keep working: for a
+    native form it is `None`.
+    """
 
     device_id: str
-    widget_id: str
+    #: `id` of the widget, for the form of an `action` widget.
+    widget_id: str | None = None
+    #: `id` of the native form (`NativeForm.id`), for a form opened with
+    #: `showForm`. The app generates one if the page gave none.
+    form_id: str | None = None
     #: `id` of the field (`type="search"` or `select` with `remote=True`).
     field_id: str
     #: Search text entered, empty for `select` or `min_query_length=0`.
@@ -486,8 +629,19 @@ class WidgetOptionsRequest(BaseModel):
     #: pages), same format as `WidgetActionReceived.values`. This lets you
     #: build dependent fields.
     values: dict[str, Any] = {}
+    #: The `context` object the page put into the definition of a native form,
+    #: unchanged (e.g. the customer the form was opened for). Not to be
+    #: confused with the second argument of your callback, the
+    #: `WidgetRequestContext`. Client input like everything else here.
+    context: dict[str, Any] | None = None
     #: See `WidgetActionReceived.user_email`.
     user_email: str | None = None
+
+    @model_validator(mode="after")
+    def _widget_or_form(self) -> WidgetOptionsRequest:
+        if (self.widget_id is None) == (self.form_id is None):
+            raise ValueError("Exactly one of `widget_id` and `form_id` must be set.")
+        return self
 
 
 class WidgetOptionsResult(_CamelModel):

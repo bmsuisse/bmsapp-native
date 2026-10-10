@@ -3,6 +3,8 @@
 // to any number of listeners. A custom function that was already set before
 // keeps being called.
 
+import type { NativeSurfaceActionEvent } from './surfaces.js'
+
 export type NativeEventMap = {
   /** Item in the native menu (or a Spotlight/Siri result) tapped. */
   menuSelect: string
@@ -12,6 +14,12 @@ export type NativeEventMap = {
   bottomBarTap: string
   /** Result of `scanBarcode()`. */
   barcodeScanned: string
+  /**
+   * The app waits for the page: a native form was submitted or a content action
+   * tapped with `wait`. Answer with `surfaceResult`, or let the `onSubmit` /
+   * `onAction` options of `showForm` / `showContent` do it.
+   */
+  surfaceAction: NativeSurfaceActionEvent
 }
 
 export type NativeEvent = keyof NativeEventMap
@@ -21,6 +29,7 @@ const GLOBALS: Record<NativeEvent, string> = {
   actionButtonTap: 'onNativeActionButtonTap',
   bottomBarTap: 'onNativeBottomBarTap',
   barcodeScanned: 'onBarcodeScanned',
+  surfaceAction: 'onNativeSurfaceAction',
 }
 
 type Listener<E extends NativeEvent> = (payload: NativeEventMap[E]) => void

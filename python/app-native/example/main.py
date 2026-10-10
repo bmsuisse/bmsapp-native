@@ -26,6 +26,13 @@ Try it (in the no-login mode above):
       -H "Content-Type: application/json" \\
       -d '{"device_id": "abc", "widget_id": "new-visit", "field_id": "customer", "query": "mus"}'
 
+    # Native forms, see docs/native-surfaces-guide.md: the definition of a form
+    # that the page passes to showForm, and the endpoint it posts the result to.
+    curl http://localhost:8000/api/forms/new-customer
+    curl -X POST http://localhost:8000/api/customers \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Miller Ltd", "email": "info@example.com", "card": []}'
+
     # Live Activities, see docs/live-activities-guide.md: the app reports an
     # activity's token, then each call moves it one step further.
     curl -X POST http://localhost:8000/api/live-activities \\
@@ -65,6 +72,9 @@ from bmsdna.app_native import (
     LiveActivityState,
     LiveActivityTokenReceived,
     LocationUpdate,
+    NativeFileRef,
+    NativeForm,
+    NativeFormSubmit,
     NotificationActionReceived,
     ProgressData,
     ProgressWidget,
@@ -85,6 +95,7 @@ from bmsdna.app_native import (
     create_widget_feed_router,
     create_widget_options_router,
     insecure_no_auth,
+    resolve_file_refs,
     send_live_activity_end,
     send_live_activity_update,
     send_push,
@@ -92,6 +103,8 @@ from bmsdna.app_native import (
     send_widget_update,
 )
 from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 
 @dataclass
@@ -123,9 +136,68 @@ async def _on_location_received(body: LocationUpdate, context: WidgetRequestCont
     _locations.append(body.model_dump())
 
 
-async def _on_document_received(doc: ReceivedDocument, context: WidgetRequestContext) -> None:
-    # In a real app: store in blob storage/DB. Only logged here.
-    print(f"Document received: {doc.filename} ({len(doc.data)} bytes, kind={doc.metadata.kind})")
+@dataclass
+class _Upload:
+    owner: str
+    filename: str
+    content_type: str
+    data: bytes
+    stored_at: datetime
+
+
+class _UploadStore:
+    """The files that native forms upload, until the page's own request names
+    them. In a real app this is blob storage plus a table with a unique
+    `(owner, upload_id)` constraint; the three rules are the same:
+
+    - idempotent per `upload_id`: the app repeats an upload after a failed attempt
+    - resolving checks the **owner**: the reference comes from the page
+    - uploads that no request ever names are deleted after a while (`purge`)
+    """
+
+    def __init__(self) -> None:
+        self._files: dict[tuple[str, str], _Upload] = {}
+
+    def put(self, owner: str, upload_id: str, doc: ReceivedDocument) -> str:
+        self._files.setdefault(
+            (owner, upload_id),
+            _Upload(owner, doc.filename, doc.content_type, doc.data, datetime.now(UTC)),
+        )
+        return upload_id  # the reference the page gets
+
+    def get(self, owner: str, ref: str) -> _Upload | None:
+        return self._files.get((owner, ref))
+
+    def discard(self, owner: str, refs: list[str]) -> None:
+        for ref in refs:
+            self._files.pop((owner, ref), None)
+
+    def purge(self, max_age: timedelta = timedelta(hours=24)) -> int:
+        """Run from a scheduled job."""
+        cutoff = datetime.now(UTC) - max_age
+        old = [key for key, upload in self._files.items() if upload.stored_at < cutoff]
+        for key in old:
+            del self._files[key]
+        return len(old)
+
+
+_uploads = _UploadStore()
+
+
+def _owner(context: WidgetRequestContext) -> str:
+    # The verified user, never the `user_email` from the request body.
+    return context.user.oid if isinstance(context.user, EntraUser) else "anonymous"
+
+
+async def _on_document_received(doc: ReceivedDocument, context: WidgetRequestContext) -> str | None:
+    meta = doc.metadata
+    if meta.kind == "form" and meta.upload_id:
+        # A photo, scan or signature of a native form: keep it by reference
+        # until the page's own request (POST /api/customers) names it.
+        return _uploads.put(_owner(context), meta.upload_id, doc)
+    # A scan: in a real app store in blob storage/DB. Only logged here.
+    print(f"Document received: {doc.filename} ({len(doc.data)} bytes, kind={meta.kind})")
+    return None
 
 
 async def _on_notification_action(
@@ -309,6 +381,15 @@ _customers = {
 async def _on_widget_options(
     req: WidgetOptionsRequest, context: WidgetRequestContext
 ) -> list[ActionOption]:
+    if req.form_id == "new-customer" and req.field_id == "owner":
+        # A native form (`showForm`): `req.form_id` instead of `req.widget_id`,
+        # and `req.context` is what the page put into the definition.
+        query = req.query.casefold()
+        return [
+            ActionOption(value=value, label=name)
+            for value, name in {"u-1": "Anna Muster", "u-2": "Beat Keller"}.items()
+            if query in name.casefold()
+        ]
     if req.field_id == "customer":
         query = req.query.casefold()
         return [
@@ -338,6 +419,37 @@ async def _on_widget_action(
             message=f"Ordered: {action.values.get('qty')} × {action.values.get('article')}"
         )
     return WidgetActionResult(ok=False, message="Unknown action")
+
+
+# --- Native forms -----------------------------------------------------------
+
+
+def _new_customer_form() -> NativeForm:
+    return NativeForm(
+        id="new-customer",
+        title="New customer",
+        text="Fill in the basic data.",
+        fields=[
+            ActionField(id="name", label="Company name", required=True, max_length=80),
+            ActionField(id="email", type="email", label="Email", required=True),
+            ActionField(id="owner", type="search", label="Account manager", min_query_length=1),
+            ActionField(id="card", type="photo", label="Business card", max=1, source="both"),
+        ],
+        submit=NativeFormSubmit(label="Create customer"),
+    )
+
+
+class _NewCustomer(BaseModel):
+    """What the page posts after `showForm`: the values, and for the photo
+    field the references that the app got from `_on_document_received`."""
+
+    name: str
+    email: str
+    owner: str | None = None
+    card: list[NativeFileRef] = []
+
+
+_customer_emails: set[str] = set()
 
 
 # --- Live Activities -------------------------------------------------------
@@ -425,6 +537,39 @@ app.include_router(
     create_live_activity_router(on_token_received=_on_live_activity_token, auth_dependency=_auth),
     prefix="/api",
 )
+
+
+@app.get(
+    "/api/forms/new-customer",
+    response_model=NativeForm,
+    response_model_by_alias=True,  # camelCase, as the app expects it
+    response_model_exclude_none=True,
+    dependencies=[Depends(_auth)],
+)
+async def new_customer_form() -> NativeForm:
+    """The page passes this to `showForm` unchanged."""
+    return _new_customer_form()
+
+
+@app.post("/api/customers", response_model=None)
+async def create_customer(
+    body: _NewCustomer, context_user: Any = Depends(_auth)
+) -> JSONResponse | dict[str, Any]:
+    if body.email in _customer_emails:
+        # With `onSubmit` the form stays open and the field is marked.
+        return JSONResponse(
+            status_code=422, content={"fieldErrors": {"email": "Already registered"}}
+        )
+    owner = context_user.oid if isinstance(context_user, EntraUser) else "anonymous"
+    # 422 naming the references that are unknown, expired or not this user's.
+    cards = await resolve_file_refs(body.card, lambda ref: _async_get(owner, ref))
+    _customer_emails.add(body.email)
+    _uploads.discard(owner, [card.ref for card in body.card])  # kept for good elsewhere now
+    return {"ok": True, "files": [card.filename for card in cards]}
+
+
+async def _async_get(owner: str, ref: str) -> _Upload | None:
+    return _uploads.get(owner, ref)
 
 
 @app.post("/api/orders/{order_id}/advance", dependencies=[Depends(_auth)])
