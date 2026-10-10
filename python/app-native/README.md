@@ -33,6 +33,7 @@ from bmsdna.app_native import send_push, create_ingest_router
 - [create_document_router() — receiving file uploads (scans)](#create_document_router--receiving-file-uploads-scans)
 - [create_notification_action_router() — receiving interactive push buttons](#create_notification_action_router--receiving-interactive-push-buttons)
 - [Dashboard widgets: feed, actions, `send_widget_update()`](#dashboard-widgets-feed-actions-send_widget_update)
+- [Native forms and content: `NativeForm`, `NativeContent`, uploads, option lookups](#native-forms-and-content-nativeform-nativecontent-uploads-option-lookups)
 - [Live Activities: `send_live_activity_update()` & co.](#live-activities-send_live_activity_update--co)
 - [Approvals: `create_approvals_router()`, `send_approvals_update()`](#approvals-create_approvals_router-send_approvals_update)
 - [Urgent pushes and critical alerts: `send_critical_alert()`](#urgent-pushes-and-critical-alerts-send_critical_alert)
@@ -237,7 +238,12 @@ app.include_router(
 
 Form fields: `file` (required), `device_id` (required), `user_email`
 (optional), `kind` (optional, a free-form distinguishing attribute such as
-`"scan"`/`"signature"`/`"receipt"`).
+`"scan"`/`"signature"`/`"receipt"`). The media of **native forms** arrive here
+too, with `kind="form"` and four more fields: `upload_id` (a UUID per file, the
+same one again after a failed attempt), `form_id`, `field_id` and `context`
+(JSON text). They are in `doc.metadata` (`context` already parsed; text that is
+not a JSON object is answered with 422). Details in the
+[native forms section](#native-forms-and-content-nativeform-nativecontent-uploads-option-lookups).
 
 `ReceivedDocument` (not a Pydantic model but a `dataclass` — it contains raw
 bytes that do not go through JSON):
@@ -245,11 +251,17 @@ bytes that do not go through JSON):
 ```python
 @dataclass
 class ReceivedDocument:
-    metadata: DocumentMetadata  # device_id, user_email, kind
+    metadata: DocumentMetadata  # device_id, user_email, kind, upload_id, form_id, field_id, context
     filename: str  # base name only, `../` parts are stripped
     content_type: str
     data: bytes
 ```
+
+The callback may return a **reference** to what it stored: a `str` or `int`, or
+a dict with an `"id"`. The response is then `{"ok": true, "id": <reference>}`,
+and a native form hands the page that reference. Without a return value (every
+callback written before native forms) it is `{"ok": true}` and the page gets
+the `upload_id`.
 
 Triggered when the web app in the WebView calls
 `window.webkit.messageHandlers.nativeBridge.postMessage({action: "scanDocument"})`
@@ -351,13 +363,13 @@ await send_widget_update(
 )
 ```
 
-| Endpoint / function                                         | Purpose                                                                                                                                                                                                                                                                                                                       |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET <prefix>/widgets?device_id=…`                          | Feed. The app fetches it itself and uses it to replace all of your web app's widgets.                                                                                                                                                                                                                                         |
-| `POST <prefix>/widget-actions`                              | Button tap on a widget → `on_action_received(WidgetActionReceived, WidgetRequestContext)`. Returns `WidgetActionResult` or `None` (= ok).                                                                                                                                                                                     |
-| `POST <prefix>/widget-options`                              | Results for search fields (`type="search"`) and lazily loaded select fields (`select` with `remote=True`) in `action` forms → `on_options_requested(WidgetOptionsRequest, WidgetRequestContext)`. Returns `WidgetOptionsResult` or directly a list of `ActionOption`, e.g. from Meilisearch (`create_widget_options_router`). |
-| `send_widget_update(device_token, webapp_id, widgets=None)` | Silent push: with `widgets`, they are sent inline (automatically falls back to a feed fetch above `MAX_INLINE_WIDGETS_BYTES`); without `widgets`, only a feed fetch.                                                                                                                                                          |
-| `dump_widgets(widgets)`                                     | Widgets as JSON-ready dicts in the app format, e.g. for the JS bridge or an endpoint of your own.                                                                                                                                                                                                                             |
+| Endpoint / function                                         | Purpose                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET <prefix>/widgets?device_id=…`                          | Feed. The app fetches it itself and uses it to replace all of your web app's widgets.                                                                                                                                                                                                                                                                                                                        |
+| `POST <prefix>/widget-actions`                              | Button tap on a widget → `on_action_received(WidgetActionReceived, WidgetRequestContext)`. Returns `WidgetActionResult` or `None` (= ok).                                                                                                                                                                                                                                                                    |
+| `POST <prefix>/widget-options`                              | Results for search fields (`type="search"`) and lazily loaded select fields (`select` with `remote=True`) in `action` forms **and in native forms** → `on_options_requested(WidgetOptionsRequest, WidgetRequestContext)`. Exactly one of `req.widget_id` / `req.form_id` is set. Returns `WidgetOptionsResult` or directly a list of `ActionOption`, e.g. from Meilisearch (`create_widget_options_router`). |
+| `send_widget_update(device_token, webapp_id, widgets=None)` | Silent push: with `widgets`, they are sent inline (automatically falls back to a feed fetch above `MAX_INLINE_WIDGETS_BYTES`); without `widgets`, only a feed fetch.                                                                                                                                                                                                                                         |
+| `dump_widgets(widgets)`                                     | Widgets as JSON-ready dicts in the app format, e.g. for the JS bridge or an endpoint of your own.                                                                                                                                                                                                                                                                                                            |
 
 `WidgetRequestContext.user` is the return value of your `auth_dependency`
 (see below). Unlike with the other routers, you get it here
@@ -369,6 +381,114 @@ The user can also place the widgets individually on their Home Screen
 ("web app widget", iOS 17 and later). This needs nothing extra. A
 button tap from there arrives with `source="homeScreen"` in
 `WidgetActionReceived`.
+
+## Native forms and content: `NativeForm`, `NativeContent`, uploads, option lookups
+
+A web page can open native iOS sheets: a **form** (`showForm`) or **content**
+(`showContent`, text, image, table, map, buttons, …). The page sends the
+definition, the app renders it and answers once. The backend has three jobs,
+all with existing building blocks; there is nothing else to mount. Full guide:
+[docs/native-surfaces-guide.md](../../docs/native-surfaces-guide.md).
+
+**1. Serve the definition** (optional; the page can also build it itself).
+`NativeForm` and `NativeContent` have the same shape as the TypeScript types and
+validate the format and the app's limits (`MAX_FORM_FIELDS`, `MAX_CONTENT_BLOCKS`,
+`MAX_REPEAT_FIELDS`, `MAX_THEN_STEPS`, …), so typos show up here and not as
+`invalid` or `tooLarge` on the device. A definition beyond a limit raises
+`SurfaceLimitError` (what the app answers `tooLarge`); every other problem is
+`invalid`:
+
+```python
+from bmsdna.app_native import ActionField, NativeForm, NativeFormSubmit
+
+
+@app.get(
+    "/api/forms/new-customer",
+    response_model=NativeForm,
+    response_model_by_alias=True,  # camelCase, as the app expects it
+    response_model_exclude_none=True,
+)
+async def new_customer_form() -> NativeForm:
+    return NativeForm(
+        id="new-customer",
+        title="New customer",
+        fields=[
+            ActionField(id="name", label="Company name", required=True),
+            ActionField(id="email", type="email", label="Email"),
+            ActionField(id="card", type="photo", label="Business card", max=1),
+        ],
+        submit=NativeFormSubmit(label="Create customer"),
+    )
+```
+
+The page passes what it gets to `showForm` unchanged. The form fields are
+`ActionField`, the same model as in `action` widgets; it accepts all field types
+(`textarea`, `email`, `phone`, `url`, `multiselect`, `segmented`, `stepper`,
+`time`, `datetime`, `info`, `photo`, `scan`, `signature`, `barcode`, `repeat`)
+and the validation properties (`min_length`, `max_length`, `min`, `max`,
+`pattern`, `pattern_message`, `help`). Content blocks are `HeadingBlock`,
+`TextBlock`, `ImageBlock`, `FactsBlock`, `ListBlock`, `TableBlock`, `MapBlock`,
+`FileBlock`, `VideoBlock`, `CalloutBlock`, `BadgesBlock`, `ButtonsBlock`,
+`KpiBlock`, `StatsBlock`, `ChartBlock`, `ProgressBlock`, `FieldsBlock`,
+`CardBlock`, `RowBlock`, `DividerBlock`, `SpacerBlock`; `NativeAction` is a
+button with `then` steps (`OpenPathStep`, `OpenUrlStep`, `CopyStep`,
+`ShareStep`, `CloseStep`, `DeviceStep`, `ShowFormStep`, `ShowContentStep`).
+`dump_native_form()` and `dump_native_content()` give plain dicts.
+
+**2. Option lookups.** `search` fields and remote `select` fields of a native
+form use `create_widget_options_router` with the same request as for widgets,
+but with `form_id` instead of `widget_id`, plus the `context` of the
+definition (`WidgetOptionsRequest.context`). Exactly one of `widget_id` and
+`form_id` is set; existing callbacks that only look at `widget_id` keep working.
+
+```python
+async def on_options(req: WidgetOptionsRequest, context: WidgetRequestContext):
+    if req.form_id == "new-customer" and req.field_id == "owner":
+        return [ActionOption(value=u.id, label=u.name) for u in await find_users(req.query)]
+    ...
+```
+
+**3. Media uploads.** `photo`, `scan` and `signature` fields are uploaded by the
+app to the document router (`create_document_router`, `kind="form"`) **before**
+the page gets the form result. The callback returns a reference, the page
+sends the references to its own endpoint, and `resolve_file_refs` turns them
+back:
+
+```python
+from bmsdna.app_native import NativeFileRef, ReceivedDocument, resolve_file_refs
+
+
+async def on_document_received(doc: ReceivedDocument, context: WidgetRequestContext) -> str | None:
+    if doc.metadata.kind != "form":
+        return None  # a scan: as before
+    # Idempotent per upload_id (the app retries): key your storage by it.
+    return await uploads.put(owner=context.user.oid, upload_id=doc.metadata.upload_id, doc=doc)
+
+
+class NewCustomer(BaseModel):
+    name: str
+    card: list[NativeFileRef] = []
+
+
+@app.post("/api/customers")
+async def create_customer(body: NewCustomer, user: EntraUser = Depends(auth)):
+    # 422 naming the references that are unknown, expired or not this user's.
+    cards = await resolve_file_refs(body.card, lambda ref: uploads.get(owner=user.oid, ref=ref))
+    ...
+```
+
+| Name                                                              | What                                                                                                  |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `NativeFileRef`                                                   | `{name, mime, size, ref}`: a file of a form as the page sends it to your endpoint                     |
+| `resolve_file_refs(refs, lookup)`                                 | `lookup(ref)` returns what you stored or `None`; result in order, 422 with the unknown refs otherwise |
+| `DocumentMetadata.upload_id`, `.form_id`, `.field_id`, `.context` | the new upload fields                                                                                 |
+| `WidgetOptionsRequest.form_id`, `.context`                        | the new lookup fields                                                                                 |
+
+Two rules for the store behind it: **check the owner** when resolving (the
+reference is client input), and **delete uploads that no request ever names**
+after a while (a TTL, for example 24 hours): a user who adds a photo and drops
+the form leaves a file behind. The in-memory `_UploadStore` in
+[`example/main.py`](example/main.py) shows the pattern.
 
 ## Live Activities: `send_live_activity_update()` & co.
 

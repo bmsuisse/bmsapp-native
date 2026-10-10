@@ -420,7 +420,19 @@ in the app. If your web app also delivers a feed with a widget of the same
 ```
 
 - **Field types:** `text` | `number` | `select` | `toggle` | `date` |
-  `search` (see [Remote fields](#remote-fields-search-and-selection-from-your-backend)).
+  `search` (see [Remote fields](#remote-fields-search-and-selection-from-your-backend)),
+  and the newer `textarea` | `email` | `phone` | `url` | `multiselect` |
+  `segmented` | `stepper` | `time` | `datetime` | `info` | `photo` | `scan` |
+  `signature` | `barcode` | `repeat`. An older app shows a type it does not
+  know as `text`.
+- **Validation:** `minLength`, `maxLength`, `min`, `max`, `pattern` (with
+  `patternMessage`) and `help` (a footnote under the field) work in action
+  widget forms as well.
+- **The same fields as in native forms:** a web page can open exactly this
+  form engine itself with `showForm`. All field types, their values and the
+  media fields (`photo`, `scan`, `signature`, which upload to your document
+  router and need `camera`) are described in
+  [native-surfaces-guide.md](native-surfaces-guide.md#field-types).
 - **`value`:** optional default value, dates as `"YYYY-MM-DD"`.
 - **Display:** The tile only shows `text` and the buttons. If the action
   has fields, a button tap opens a native form sheet with the fields, which
@@ -531,6 +543,10 @@ POST /api/widget-options
 ```
 
 `values` contains everything entered so far, including on earlier pages.
+The same endpoint serves the native forms that a web page opens with
+`showForm`: the request then has `form_id` instead of `widget_id`, plus the
+`context` of the definition (exactly one of `widget_id` / `form_id` is set), see
+[native-surfaces-guide.md](native-surfaces-guide.md#option-lookup-search-and-remote-select).
 Response (at most 50 results are shown):
 
 ```json

@@ -39,6 +39,11 @@ export type NativeResult<T extends object = object> =
  *   carry it automatically, and `getAccessToken()` works.
  * - `deviceApps`: needed for `addReminder` and `saveContact`. `navigate` and
  *   `callPhone` only open another app and need no capability.
+ * - `nativeForms`: needed for `showForm`. The form field types `photo` (camera
+ *   source), `scan` and `barcode` also need `camera`.
+ * - `nativeContent`: needed for `showContent`. `closeSurface` and
+ *   `surfaceResult` need either of the two. The follow-up actions
+ *   `saveContact` and `addReminder` (in `then`) also need `deviceApps`.
  */
 export type Capability =
   | 'location'
@@ -51,6 +56,8 @@ export type Capability =
   | 'liveActivities'
   | 'approvals'
   | 'deviceApps'
+  | 'nativeForms'
+  | 'nativeContent'
   | (string & {})
 
 type Message = Record<string, unknown>

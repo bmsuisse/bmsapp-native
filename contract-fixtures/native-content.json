@@ -1,0 +1,210 @@
+{
+  "id": "customer-123",
+  "title": "Miller Ltd",
+  "subtitle": "Customer 123",
+  "size": "medium",
+  "tint": "#2e4a62",
+  "context": { "customerId": "123" },
+  "blocks": [
+    {
+      "type": "image",
+      "url": "https://example.com/logo.png",
+      "alt": "Company logo",
+      "caption": "Since 1998",
+      "height": 140,
+      "fit": "fit",
+      "shape": "rounded",
+      "tapToZoom": true
+    },
+    {
+      "type": "image",
+      "data": "data:image/png;base64,iVBORw0KGgo=",
+      "shape": "circle"
+    },
+    { "type": "heading", "text": "Overview", "level": 2, "icon": "building.2" },
+    {
+      "type": "badges",
+      "items": [{ "text": "Key account", "tint": "#2e4a62", "icon": "star" }, { "text": "Zurich" }]
+    },
+    {
+      "type": "facts",
+      "items": [
+        { "label": "Phone", "value": "+41 44 000 00 00", "kind": "phone", "icon": "phone" },
+        { "label": "Email", "value": "info@example.com", "kind": "email", "copyable": true },
+        { "label": "Address", "value": "Bahnhofstrasse 1, 8001 Zurich", "kind": "address" },
+        { "label": "Website", "value": "https://example.com", "kind": "url" },
+        { "label": "Customer since", "value": "2019", "kind": "text" }
+      ]
+    },
+    {
+      "type": "text",
+      "markdown": "Prefers **delivery on Tuesdays**.",
+      "style": "body",
+      "align": "leading"
+    },
+    { "type": "text", "markdown": "Updated today", "style": "footnote", "align": "trailing" },
+    {
+      "type": "callout",
+      "style": "warning",
+      "title": "Credit limit",
+      "text": "81 % of the limit is used."
+    },
+    { "type": "kpi", "data": { "value": 12, "unit": "pcs", "caption": "open orders" } },
+    {
+      "type": "stats",
+      "data": {
+        "items": [
+          { "label": "Visits", "value": 14 },
+          { "label": "Revenue", "value": "CHF 12'400", "trend": { "direction": "up" } }
+        ]
+      }
+    },
+    {
+      "type": "chart",
+      "data": {
+        "type": "line",
+        "unit": "CHF k",
+        "series": [
+          {
+            "name": "2026",
+            "points": [
+              { "x": "Jan", "y": 42 },
+              { "x": "Feb", "y": 51 }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "progress",
+      "data": { "value": 0.6, "total": 1, "caption": "of the yearly target", "style": "ring" }
+    },
+    {
+      "type": "table",
+      "caption": "Last orders",
+      "columns": [
+        { "key": "no", "label": "No." },
+        { "key": "amount", "label": "Amount", "align": "trailing" }
+      ],
+      "rows": [
+        { "no": "A-1001", "amount": 240 },
+        { "no": "A-1002", "amount": "CHF 1'200" }
+      ]
+    },
+    {
+      "type": "list",
+      "items": [
+        {
+          "title": "Anna Muster",
+          "subtitle": "Purchasing",
+          "trailing": "Main contact",
+          "icon": "person",
+          "action": {
+            "id": "open-contact",
+            "label": "Open",
+            "then": [{ "openPath": "/contacts/1" }]
+          }
+        },
+        { "title": "Beat Keller", "image": "https://example.com/beat.jpg" }
+      ]
+    },
+    {
+      "type": "map",
+      "latitude": 47.3769,
+      "longitude": 8.5417,
+      "name": "Head office",
+      "span": 800,
+      "height": 160
+    },
+    {
+      "type": "file",
+      "url": "https://example.com/files/contract.pdf",
+      "name": "Contract.pdf",
+      "mime": "application/pdf"
+    },
+    {
+      "type": "video",
+      "url": "https://example.com/files/intro.mp4",
+      "poster": "https://example.com/files/intro.jpg"
+    },
+    {
+      "type": "card",
+      "title": "Notes",
+      "blocks": [
+        {
+          "type": "row",
+          "blocks": [
+            { "type": "kpi", "data": { "value": 3, "caption": "calls" } },
+            { "type": "kpi", "data": { "value": 1, "caption": "complaints" } }
+          ]
+        },
+        { "type": "divider" },
+        { "type": "spacer", "height": 8 }
+      ]
+    },
+    {
+      "type": "fields",
+      "fields": [{ "id": "comment", "type": "textarea", "label": "Comment", "maxLength": 200 }]
+    },
+    {
+      "type": "buttons",
+      "items": [
+        {
+          "id": "share",
+          "label": "Share",
+          "style": "secondary",
+          "icon": "square.and.arrow.up",
+          "then": [
+            { "share": { "text": "Miller Ltd", "url": "https://example.com/customers/123" } }
+          ]
+        },
+        { "id": "copy-number", "label": "Copy number", "then": [{ "copy": "123" }] }
+      ]
+    }
+  ],
+  "actions": [
+    { "id": "new-order", "label": "New order", "style": "primary", "icon": "plus", "wait": true },
+    {
+      "id": "route",
+      "label": "Route",
+      "style": "secondary",
+      "icon": "location",
+      "then": [
+        {
+          "device": {
+            "action": "navigate",
+            "destination": { "address": "Bahnhofstrasse 1, 8001 Zurich" }
+          }
+        }
+      ]
+    },
+    { "id": "save-comment", "label": "Save comment", "submit": true, "wait": true },
+    {
+      "id": "delete",
+      "label": "Delete",
+      "style": "destructive",
+      "confirm": "Really delete this customer?",
+      "biometric": true,
+      "then": [
+        { "openUrl": "https://example.com/customers/123/deleted" },
+        {
+          "showContent": {
+            "title": "Deleted",
+            "size": "fit",
+            "blocks": [
+              { "type": "callout", "style": "success", "text": "The customer was deleted." }
+            ],
+            "actions": [{ "id": "done", "label": "Done", "then": [{ "close": true }] }]
+          }
+        },
+        {
+          "showForm": {
+            "title": "Why?",
+            "size": "fit",
+            "fields": [{ "id": "reason", "type": "textarea", "label": "Reason" }]
+          }
+        }
+      ]
+    }
+  ]
+}

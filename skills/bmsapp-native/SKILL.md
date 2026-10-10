@@ -5,13 +5,16 @@ description: >
   that hosts BMS web apps): native menu/action buttons/bottom bar, toast,
   haptics, share, Face ID confirmation, document or barcode scan, dashboard
   widgets, Live Activities, approvals, push notifications (APNs), sign-in with
-  the app's Entra token, route/reminder/contact/phone call on the iPhone. Covers `@bmsuisse/app-native` (npm, frontend) and
+  the app's Entra token, route/reminder/contact/phone call on the iPhone,
+  native forms and native content screens (iOS sheets with fields, photo/scan/
+  signature, tables, maps) opened from the page. Covers `@bmsuisse/app-native` (npm, frontend) and
   `bmsdna-app-native` (Python, backend). Use instead of hand-writing
   `window.BMSNative` / `window.webkit.messageHandlers` calls or copying
   APNs/widget code into the project. Triggers: "in the app", "native
   bridge", "BMSNative", "push to the app", "widget on the dashboard", "Live
   Activity", "approvals in the app", "iOS app", "Entra token", "sign-in in the
-  app", "navigate to", "reminder on the iPhone".
+  app", "navigate to", "reminder on the iPhone", "native form", "showForm",
+  "showContent", "native sheet".
 ---
 
 # bmsapp-native — connecting web apps and backends to the BMS app
@@ -47,3 +50,10 @@ project (e.g. a custom `nativeBridge.ts` or `ios_push.py`) — if something is m
    token. Guide: `docs/entra-token-guide.md`.
 8. **Reminders and contacts need `deviceApps`**; route and phone call do not.
    Guide: `docs/device-actions-guide.md`.
+9. **Native forms and content** (`showForm`, `showContent`) need `nativeForms` /
+   `nativeContent`; camera fields also `camera`. **Keep the web UI as the
+   fallback** (`canShowNativeForms()`, `isNativeSurfaceUnsupported()`): browsers,
+   old app builds (`unknownAction`, treat like `unavailable`) and web apps
+   without the capability. Never rely on a field or block type being known by an
+   older app. Use `onSubmit` so the backend can reject with field errors. Guide:
+   `docs/native-surfaces-guide.md`.

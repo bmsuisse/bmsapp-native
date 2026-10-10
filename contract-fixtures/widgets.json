@@ -146,5 +146,60 @@
         }
       ]
     }
+  },
+  {
+    "id": "new-customer",
+    "kind": "action",
+    "data": {
+      "text": "Create a customer",
+      "fields": [
+        {
+          "id": "name",
+          "type": "text",
+          "label": "Company name",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 80
+        },
+        {
+          "id": "email",
+          "type": "email",
+          "label": "Email",
+          "pattern": "^[^@\\s]+@[^@\\s]+$",
+          "patternMessage": "Please enter a valid email address"
+        },
+        {
+          "id": "notes",
+          "type": "textarea",
+          "label": "Notes",
+          "help": "Visible to your team",
+          "maxLength": 500
+        },
+        {
+          "id": "seats",
+          "type": "stepper",
+          "label": "Seats",
+          "min": 1,
+          "max": 20,
+          "step": 1,
+          "value": 1
+        },
+        {
+          "id": "tags",
+          "type": "multiselect",
+          "label": "Tags",
+          "options": [{ "value": "vip", "label": "VIP" }, { "value": "new" }]
+        },
+        {
+          "id": "card",
+          "type": "photo",
+          "label": "Business card",
+          "max": 1,
+          "source": "camera",
+          "maxDimension": 2048
+        }
+      ],
+      "buttons": [{ "id": "create", "label": "Create", "icon": "checkmark" }]
+    }
   }
 ]

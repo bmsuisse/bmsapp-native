@@ -469,3 +469,127 @@ def test_visible_if_serializes_and_must_reference_another_field() -> None:
             fields=[ActionField(id="reason", visible_if=ActionCondition(field="reason"))],
             buttons=[ActionButton(id="go", label="Go")],
         )
+
+
+@pytest.mark.asyncio
+async def test_options_router_serves_native_forms_with_form_id_and_context() -> None:
+    received: list[WidgetOptionsRequest] = []
+
+    async def on_options(
+        req: WidgetOptionsRequest, context: WidgetRequestContext
+    ) -> list[ActionOption]:
+        received.append(req)
+        return [ActionOption(value="u-1", label="Anna Muster")]
+
+    app = FastAPI()
+    app.include_router(
+        create_widget_options_router(
+            on_options_requested=on_options, auth_dependency=insecure_no_auth
+        ),
+        prefix="/api",
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/widget-options",
+            json={
+                "device_id": "abc",
+                "form_id": "new-customer",
+                "field_id": "owner",
+                "query": "an",
+                "values": {"type": "b2b"},
+                "context": {"source": "customer-list"},
+                "user_email": "anna@example.com",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"options": [{"value": "u-1", "label": "Anna Muster"}]}
+    assert received[0].form_id == "new-customer"
+    assert received[0].widget_id is None
+    assert received[0].context == {"source": "customer-list"}
+    assert received[0].values == {"type": "b2b"}
+
+
+@pytest.mark.asyncio
+async def test_options_router_keeps_working_for_widgets_without_context() -> None:
+    received: list[WidgetOptionsRequest] = []
+
+    async def on_options(req: WidgetOptionsRequest, context: WidgetRequestContext) -> list[Any]:
+        received.append(req)
+        return []
+
+    app = FastAPI()
+    app.include_router(
+        create_widget_options_router(
+            on_options_requested=on_options, auth_dependency=insecure_no_auth
+        ),
+        prefix="/api",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/widget-options",
+            json={"device_id": "abc", "widget_id": "new-visit", "field_id": "customer"},
+        )
+
+    assert response.status_code == 200
+    assert received[0].widget_id == "new-visit"
+    assert received[0].form_id is None
+    assert received[0].context is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ids",
+    [{}, {"widget_id": "w", "form_id": "f"}],
+    ids=["neither", "both"],
+)
+async def test_options_router_wants_exactly_one_of_widget_id_and_form_id(
+    ids: dict[str, str],
+) -> None:
+    async def on_options(req: WidgetOptionsRequest, context: WidgetRequestContext) -> list[Any]:
+        raise AssertionError("must not be called")
+
+    app = FastAPI()
+    app.include_router(
+        create_widget_options_router(
+            on_options_requested=on_options, auth_dependency=insecure_no_auth
+        ),
+        prefix="/api",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/widget-options", json={"device_id": "abc", "field_id": "customer", **ids}
+        )
+
+    assert response.status_code == 422
+
+
+def test_widget_forms_accept_the_new_field_types_and_properties() -> None:
+    data = ActionData(
+        fields=[
+            ActionField(id="notes", type="textarea", help="Visible", max_length=500),
+            ActionField(id="mail", type="email", pattern=r"^\S+@\S+$", pattern_message="Invalid"),
+            ActionField(id="seats", type="stepper", min=1, max=9, step=2),
+            ActionField(id="card", type="photo", max=2, source="library", max_dimension=1024),
+            ActionField(
+                id="tags",
+                type="multiselect",
+                options=[ActionOption(value="a"), ActionOption(value="b")],
+            ),
+        ],
+        buttons=[ActionButton(id="go", label="Go")],
+    )
+
+    dumped = data.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+    assert dumped["fields"][0] == {"id": "notes", "type": "textarea", "help": "Visible",
+                                   "maxLength": 500}  # fmt: skip
+    assert dumped["fields"][1]["patternMessage"] == "Invalid"
+    assert dumped["fields"][2] == {"id": "seats", "type": "stepper", "min": 1, "max": 9, "step": 2}
+    assert dumped["fields"][3]["maxDimension"] == 1024

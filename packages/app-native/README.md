@@ -5,7 +5,8 @@ app injects into every web app — with browser fallbacks, so the same page
 also runs outside the app. No dependencies, no React required.
 
 Backend counterpart: [`bmsdna-app-native`](../../python/app-native)
-(Python). Detailed guides per topic: [`docs/`](../../docs).
+(Python). Detailed guides per topic: [`docs/`](../../docs), for native forms and
+content [native-surfaces-guide.md](../../docs/native-surfaces-guide.md).
 
 ## Installation
 
@@ -35,6 +36,10 @@ import {
   saveContact,
   callPhone,
   toIsoWithOffset,
+  canShowNativeForms,
+  isNativeSurfaceUnsupported,
+  showForm,
+  showContent,
 } from '@bmsuisse/app-native'
 
 // Is the page running in the app? Does it have a given capability?
@@ -76,19 +81,49 @@ await navigate({ destination: { name: 'Müller AG', address: 'Industriestrasse 5
 await addReminder({ title: 'Call Mr. Meier back', due: toIsoWithOffset(new Date(2026, 9, 2, 9)) })
 await saveContact({ givenName: 'Anna', organization: 'Müller AG', phones: ['+41 44 000 00 00'] })
 await callPhone({ number: '+41 44 000 00 00' })
+
+// Native form (an iOS sheet). The form stays open until your handler settles:
+// `{ fieldErrors }` or a thrown error marks fields and lets the user correct.
+if (canShowNativeForms()) {
+  const res = await showForm(
+    {
+      id: 'new-customer',
+      title: 'New customer',
+      fields: [
+        { id: 'name', type: 'text', label: 'Company name', required: true },
+        { id: 'email', type: 'email', label: 'Email', required: true },
+        { id: 'card', type: 'photo', label: 'Business card', max: 1 },
+      ],
+    },
+    { onSubmit: async (values) => await api.createCustomer(values) }
+  )
+  if (!res.ok && isNativeSurfaceUnsupported(res)) openWebForm() // old app, no capability
+} else {
+  openWebForm()
+}
+
+// Native content: info with blocks and buttons
+const shown = await showContent({
+  title: 'Miller Ltd',
+  blocks: [
+    { type: 'facts', items: [{ label: 'Phone', value: '+41 44 000 00 00', kind: 'phone' }] },
+  ],
+  actions: [{ id: 'new-order', label: 'New order', style: 'primary' }],
+})
 ```
 
 ## Behavior outside the app
 
-| Function                                                          | Browser                                         |
-| ----------------------------------------------------------------- | ----------------------------------------------- |
-| `toast`, `haptic`, `setBadge`, `setChrome`                        | does nothing                                    |
-| `share`                                                           | Web Share API, otherwise clipboard (`'copied'`) |
-| `openExternal`                                                    | new tab                                         |
-| `biometricConfirm`                                                | `{ ok: true }` (web flow continues)             |
-| `navigate`                                                        | route in Google Maps in a new tab               |
-| `callPhone`                                                       | `tel:` link                                     |
-| all others (`setWidgets`, `startLiveActivity`, `scanDocument`, …) | `{ ok: false, error: 'unavailable' }`           |
+| Function                                                          | Browser                                                                           |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `toast`, `haptic`, `setBadge`, `setChrome`                        | does nothing                                                                      |
+| `share`                                                           | Web Share API, otherwise clipboard (`'copied'`)                                   |
+| `openExternal`                                                    | new tab                                                                           |
+| `biometricConfirm`                                                | `{ ok: true }` (web flow continues)                                               |
+| `navigate`                                                        | route in Google Maps in a new tab                                                 |
+| `callPhone`                                                       | `tel:` link                                                                       |
+| `showForm`, `showContent`, `closeSurface`                         | `{ ok: false, error: 'unavailable' }` — keep your web UI (`canShowNativeForms()`) |
+| all others (`setWidgets`, `startLiveActivity`, `scanDocument`, …) | `{ ok: false, error: 'unavailable' }`                                             |
 
 ## Responses and errors
 
@@ -96,27 +131,31 @@ Calls with a response return `{ ok: true, … }` or `{ ok: false, error }`.
 Common errors: `capability` (the app has not granted the capability to the
 web app), `invalid`, `cancelled`, `unavailable`, `notConfigured`; for
 `getAccessToken` also `forbidden` and `notSignedIn`; for the device actions also
-`denied`.
+`denied`; for `showForm`/`showContent` also `forbidden`, `busy` and `tooLarge`.
+An app that predates a call answers `unknownAction`: treat it like `unavailable`.
 `can(capability)` saves unnecessary calls, but the app always checks on its
 own.
 
 ## Overview
 
-| Area            | Functions                                                                         | Capability                        |
-| --------------- | --------------------------------------------------------------------------------- | --------------------------------- |
-| Detection       | `isNativeApp`, `nativeInfo`, `can`                                                | –                                 |
-| Events          | `on('menuSelect' \| 'actionButtonTap' \| 'bottomBarTap' \| 'barcodeScanned', …)`  | –                                 |
-| Chrome          | `setChrome`, `centerProminentEntry`                                               | `customChrome`, `customBottomBar` |
-| Feedback        | `toast`, `haptic`, `setBadge`                                                     | –                                 |
-| System          | `share`, `openExternal`, `biometricConfirm`                                       | –                                 |
-| Camera          | `scanDocument`, `scanBarcode`                                                     | `camera`                          |
-| Widgets         | `setWidgets`, `updateWidget`, `removeWidgets`, `refreshWidgets`                   | `dashboardWidgets`                |
-| Live Activities | `startLiveActivity`, `updateLiveActivity`, `endLiveActivity`, `getLiveActivities` | `liveActivities`                  |
-| Approvals       | `refreshApprovals`                                                                | `approvals`                       |
-| Sign-in         | `getAccessToken`                                                                  | `identity`                        |
-| Other apps      | `navigate`, `callPhone`, `addReminder`, `saveContact`, `toIsoWithOffset`          | `deviceApps` (reminder, contact)  |
-| Testing         | `sendTestNotification`                                                            | `notifications`                   |
-| Raw access      | `call`, `post`, `send`                                                            | –                                 |
+| Area            | Functions                                                                                                  | Capability                                                             |
+| --------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Detection       | `isNativeApp`, `nativeInfo`, `can`                                                                         | –                                                                      |
+| Events          | `on('menuSelect' \| 'actionButtonTap' \| 'bottomBarTap' \| 'barcodeScanned', …)`                           | –                                                                      |
+| Chrome          | `setChrome`, `centerProminentEntry`                                                                        | `customChrome`, `customBottomBar`                                      |
+| Feedback        | `toast`, `haptic`, `setBadge`                                                                              | –                                                                      |
+| System          | `share`, `openExternal`, `biometricConfirm`                                                                | –                                                                      |
+| Camera          | `scanDocument`, `scanBarcode`                                                                              | `camera`                                                               |
+| Widgets         | `setWidgets`, `updateWidget`, `removeWidgets`, `refreshWidgets`                                            | `dashboardWidgets`                                                     |
+| Live Activities | `startLiveActivity`, `updateLiveActivity`, `endLiveActivity`, `getLiveActivities`                          | `liveActivities`                                                       |
+| Approvals       | `refreshApprovals`                                                                                         | `approvals`                                                            |
+| Sign-in         | `getAccessToken`                                                                                           | `identity`                                                             |
+| Other apps      | `navigate`, `callPhone`, `addReminder`, `saveContact`, `toIsoWithOffset`                                   | `deviceApps` (reminder, contact)                                       |
+| Native forms    | `showForm`, `canShowNativeForms`, `formLimitWarnings`                                                      | `nativeForms` (+ `camera` for camera fields)                           |
+| Native content  | `showContent`, `canShowNativeContent`, `contentLimitWarnings`                                              | `nativeContent` (+ `deviceApps` for `saveContact`/`addReminder` steps) |
+| Surfaces        | `closeSurface`, `surfaceResult`, `isNativeSurfaceUnsupported`, `on('surfaceAction', …)`, `onSurfaceAction` | `nativeForms` or `nativeContent`                                       |
+| Testing         | `sendTestNotification`                                                                                     | `notifications`                                                        |
+| Raw access      | `call`, `post`, `send`                                                                                     | –                                                                      |
 
 ## License
 

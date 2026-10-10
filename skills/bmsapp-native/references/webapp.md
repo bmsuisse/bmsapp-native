@@ -49,6 +49,26 @@ const res = await addReminder({ title: 'Call back', due: toIsoWithOffset(date) }
 if (res.error === 'denied') toast(res.message, 'warning')
 ```
 
+**Native form or content** (needs `nativeForms` / `nativeContent`; keep the web
+form as the fallback):
+
+```ts
+if (canShowNativeForms()) {
+  const res = await showForm(customerForm, {
+    onSubmit: async (values) => {
+      const r = await fetch('/api/customers', { method: 'POST', body: JSON.stringify(values) })
+      if (r.status === 422) return { fieldErrors: (await r.json()).fieldErrors } // marks fields
+      if (!r.ok) throw new Error('Could not save') // form stays open
+    },
+  })
+  if (res.ok || !isNativeSurfaceUnsupported(res)) return // done, or cancelled
+}
+openWebCustomerForm() // browser, old app, no capability
+```
+
+Photos, scans and signatures arrive as references (`NativeFileRef`) that the
+app uploaded to the document router before; send them to your own backend.
+
 **Token for a WebSocket** (your own `fetch`/XHR calls get the token from the app
 automatically; a browser cannot set a header on a WebSocket):
 
@@ -57,7 +77,8 @@ const session = await getAccessToken()
 if (session.ok) socket.send(JSON.stringify({ token: session.token })) // not in the URL
 ```
 
-Types (`Widget`, `LiveActivityState`, `Chrome`, `NavigatePayload`, …) are exported as well.
+Types (`Widget`, `LiveActivityState`, `Chrome`, `NavigatePayload`, `NativeFormDef`,
+`NativeContentDef`, …) are exported as well.
 
 ## Tests
 

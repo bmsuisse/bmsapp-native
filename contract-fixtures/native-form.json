@@ -1,0 +1,134 @@
+{
+  "id": "new-customer",
+  "title": "New customer",
+  "size": "large",
+  "tint": "#2e4a62",
+  "text": "Fill in the basic data.",
+  "values": { "type": "b2b" },
+  "context": { "source": "customer-list" },
+  "pages": [
+    {
+      "title": "Company",
+      "fields": [
+        {
+          "id": "name",
+          "type": "text",
+          "label": "Company name",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 80
+        },
+        {
+          "id": "type",
+          "type": "segmented",
+          "label": "Type",
+          "options": [
+            { "value": "b2b", "label": "B2B" },
+            { "value": "b2c", "label": "B2C" }
+          ]
+        },
+        {
+          "id": "vat",
+          "type": "text",
+          "label": "VAT number",
+          "placeholder": "CHE-123.456.789",
+          "pattern": "^CHE-\\d{3}\\.\\d{3}\\.\\d{3}$",
+          "patternMessage": "Format: CHE-123.456.789",
+          "visibleIf": { "field": "type", "equals": "b2b" }
+        },
+        { "id": "founded", "type": "date", "label": "Founded" },
+        { "id": "employees", "type": "number", "label": "Employees", "min": 0, "max": 100000 }
+      ]
+    },
+    {
+      "title": "Contact",
+      "text": "How do we reach them?",
+      "fields": [
+        { "id": "email", "type": "email", "label": "Email", "required": true },
+        { "id": "phone", "type": "phone", "label": "Phone" },
+        {
+          "id": "website",
+          "type": "url",
+          "label": "Website",
+          "placeholder": "https://example.com"
+        },
+        {
+          "id": "owner",
+          "type": "search",
+          "label": "Account manager",
+          "minQueryLength": 2,
+          "value": "u-1",
+          "valueLabel": "Anna Muster"
+        },
+        {
+          "id": "channels",
+          "type": "multiselect",
+          "label": "Channels",
+          "options": [
+            { "value": "mail", "label": "Mail" },
+            { "value": "phone", "label": "Phone", "subtitle": "Office hours only" }
+          ],
+          "value": ["mail"]
+        },
+        {
+          "id": "priority",
+          "type": "select",
+          "label": "Priority",
+          "options": [{ "value": "high", "label": "High" }, { "value": "low" }]
+        },
+        { "id": "vip", "type": "toggle", "label": "VIP", "value": false },
+        { "id": "seats", "type": "stepper", "label": "Seats", "min": 1, "max": 20, "step": 1 },
+        { "id": "callback", "type": "datetime", "label": "Call back on" },
+        { "id": "opens", "type": "time", "label": "Opens at", "value": "08:00" },
+        {
+          "id": "notes",
+          "type": "textarea",
+          "label": "Notes",
+          "help": "Visible to the whole team.",
+          "maxLength": 500
+        }
+      ]
+    },
+    {
+      "title": "Documents",
+      "fields": [
+        { "id": "customer_no", "type": "info", "label": "Customer number", "value": "on save" },
+        {
+          "id": "card",
+          "type": "photo",
+          "label": "Business card",
+          "max": 1,
+          "source": "both",
+          "maxDimension": 2048
+        },
+        { "id": "contract", "type": "scan", "label": "Contract", "format": "pdf", "max": 5 },
+        { "id": "signature", "type": "signature", "label": "Signature", "required": true },
+        { "id": "gln", "type": "barcode", "label": "GLN", "symbologies": ["ean13", "qr"] },
+        {
+          "id": "lines",
+          "type": "repeat",
+          "label": "Order lines",
+          "min": 1,
+          "max": 20,
+          "addLabel": "Add line",
+          "fields": [
+            {
+              "id": "article",
+              "type": "select",
+              "label": "Article",
+              "options": [{ "value": "A1", "label": "Screws M6" }]
+            },
+            { "id": "qty", "type": "stepper", "label": "Quantity", "min": 1 }
+          ]
+        }
+      ]
+    }
+  ],
+  "submit": {
+    "label": "Create customer",
+    "confirm": "Create this customer?",
+    "biometric": false,
+    "style": "primary",
+    "wait": true
+  }
+}

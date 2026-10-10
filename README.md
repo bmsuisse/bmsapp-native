@@ -2,10 +2,10 @@
 
 Everything web apps and backends need to talk to the **BMS app** (iOS): built once, used by everyone.
 
-| Package                                             | For              | Contents                                                                                                                                                  |
-| --------------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`@bmsuisse/app-native`](packages/app-native) (npm) | Web apps         | Typed calls to `window.BMSNative` (chrome, toast, share, scan, widgets, Live Activities, approvals, sign-in token, device actions) with browser fallbacks |
-| [`bmsdna-app-native`](python/app-native) (Python)   | FastAPI backends | Push (APNs), sign-in with the Entra token, routers for devices/location, documents, push actions, widgets, Live Activities, approvals                     |
+| Package                                             | For              | Contents                                                                                                                                                                                                   |
+| --------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@bmsuisse/app-native`](packages/app-native) (npm) | Web apps         | Typed calls to `window.BMSNative` (chrome, toast, share, scan, widgets, Live Activities, approvals, sign-in token, device actions, native forms and content) with browser fallbacks                        |
+| [`bmsdna-app-native`](python/app-native) (Python)   | FastAPI backends | Push (APNs), sign-in with the Entra token, routers for devices/location, documents (incl. uploads of native forms), push actions, widgets, Live Activities, approvals, models for native forms and content |
 
 The iOS app itself lives in a separate repository. It is the other side of this standard.
 
@@ -16,7 +16,7 @@ packages/app-native/   @bmsuisse/app-native   (TypeScript, bun)
 python/app-native/     bmsdna-app-native      (Python, uv; import: bmsdna.app_native)
 contract-fixtures/     shared example payloads, tested by both sides
 e2e/                   Playwright: the built npm package in a browser against the Python models
-docs/                  one guide per topic (widgets, chrome, Live Activities, …)
+docs/                  one guide per topic (widgets, chrome, native forms and content, Live Activities, …)
 skills/                agent skill for projects that use the packages
 ```
 
