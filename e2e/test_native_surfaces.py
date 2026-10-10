@@ -106,10 +106,11 @@ def test_an_invalid_definition_is_refused_like_the_app_does(page: Page) -> None:
           big: await window.native.showForm({
             fields: [{ id: 'card', type: 'photo', max: 11 }],
           }),
+          empty: await window.native.showContent({ blocks: [] }),
         })"""
     )
 
-    for name in ("form", "content", "big"):
+    for name in ("form", "content", "big", "empty"):
         assert result[name]["ok"] is False
         assert result[name]["error"] == "invalid"
     assert "unique" in result["form"]["message"]
@@ -220,7 +221,7 @@ def test_fallback_to_the_web_ui_without_the_capability(page: Page) -> None:
             return 'web'
           }
           const direct = await n.showForm({ fields: [{ id: 'name' }] })
-          const content = await n.showContent({ blocks: [] })
+          const content = await n.showContent({ blocks: [{ type: 'divider' }] })
           return {
             forms: n.canShowNativeForms(),
             content: n.canShowNativeContent(),
@@ -249,7 +250,7 @@ def test_only_the_granted_surface_capability_is_usable(page: Page) -> None:
           forms: window.native.canShowNativeForms(),
           content: window.native.canShowNativeContent(),
           form: await window.native.showForm({ fields: [{ id: 'a' }] }),
-          shown: await window.native.showContent({ id: 'info', blocks: [] }),
+          shown: await window.native.showContent({ id: 'info', blocks: [{ type: 'divider' }] }),
           closed: await window.native.closeSurface(),
         })"""
     )
@@ -270,7 +271,7 @@ def test_fallback_in_a_browser_without_the_app(page: Page) -> None:
             content: window.native.canShowNativeContent(),
             res,
             withHandler: await window.native.showForm({ fields: [{ id: 'a' }] }, { onSubmit() {} }),
-            shown: await window.native.showContent({ blocks: [] }),
+            shown: await window.native.showContent({ blocks: [{ type: 'divider' }] }),
             closed: await window.native.closeSurface(),
             unsupported: window.native.isNativeSurfaceUnsupported(res),
           }
@@ -296,7 +297,7 @@ def test_an_older_app_answers_unknown_action(page: Page) -> None:
     result = page.evaluate(
         """async () => {
           const form = await window.native.showForm({ fields: [{ id: 'a' }] })
-          const content = await window.native.showContent({ blocks: [] })
+          const content = await window.native.showContent({ blocks: [{ type: 'divider' }] })
           return {
             form,
             content,
@@ -685,3 +686,91 @@ def test_limit_warnings_reach_the_console_and_the_call_goes_through(page: Page) 
     assert result["ok"] is False
     assert result["error"] == "invalid"
     assert any("[@bmsuisse/app-native] showForm: 61 fields" in w for w in warnings)
+
+
+def test_the_app_sends_labels_with_the_values_of_a_round_trip(page: Page) -> None:
+    _open(page)
+    _script(
+        page,
+        {
+            "submit": [
+                {
+                    "values": {"owner": "u-1", "name": "Miller Ltd"},
+                    "labels": {"owner": "Anna Muster"},
+                }
+            ]
+        },
+    )
+
+    seen = page.evaluate(
+        """async () => {
+          let seen
+          await window.native.showForm(
+            {
+              id: 'new-customer',
+              fields: [{ id: 'name' }, { id: 'owner', type: 'search' }],
+            },
+            { onSubmit: (values, event) => { seen = { values, labels: event.labels } } }
+          )
+          return seen
+        }"""
+    )
+
+    assert seen == {
+        "values": {"owner": "u-1", "name": "Miller Ltd"},
+        "labels": {"owner": "Anna Muster"},
+    }
+
+
+def test_a_chained_surface_with_its_own_round_trip_is_answered_by_id(page: Page) -> None:
+    _open(page)
+    _script(
+        page,
+        {"action": "reject"},
+        {"submit": [{"values": {"reason": "Too expensive"}}]},
+    )
+
+    result = page.evaluate(
+        """async () => {
+          const reasons = []
+          const off = window.native.onSurfaceAction('reject-reason', async ({ values }) => {
+            reasons.push(values.reason)
+            return { message: 'Rejected' }
+          })
+          try {
+            // The root has no round trip of its own. The chained form has an
+            // explicit id and switches its round trip on itself.
+            const res = await window.native.showContent({
+              id: 'order-1',
+              blocks: [{ type: 'text', markdown: 'Order **1**' }],
+              actions: [
+                {
+                  id: 'reject',
+                  label: 'Reject',
+                  style: 'destructive',
+                  then: [
+                    {
+                      showForm: {
+                        id: 'reject-reason',
+                        submit: { wait: true },
+                        fields: [{ id: 'reason', type: 'textarea', required: true }],
+                      },
+                    },
+                  ],
+                },
+              ],
+            })
+            return { res, reasons }
+          } finally {
+            off()
+          }
+        }"""
+    )
+
+    assert result["reasons"] == ["Too expensive"]
+    assert result["res"]["action"] == "reject"
+    assert result["res"]["next"]["id"] == "reject-reason"
+    assert result["res"]["next"]["values"] == {"reason": "Too expensive"}
+    assert _results(page) == [
+        {"action": "surfaceResult", "id": "reject-reason", "ok": True, "message": "Rejected"}
+    ]

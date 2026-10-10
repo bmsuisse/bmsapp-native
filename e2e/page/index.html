@@ -162,7 +162,13 @@
                 ...(def.context && { context: def.context }),
               }
             }
-            const answered = callPage(id, { id, action: 'submit', values, context: def.context })
+            const answered = callPage(id, {
+              id,
+              action: 'submit',
+              values,
+              labels,
+              context: def.context,
+            })
             if (!answered)
               return failure('unavailable', 'window.onNativeSurfaceAction is not defined')
             const reply = await answered
