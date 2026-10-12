@@ -245,12 +245,68 @@
           }
         }
 
+        // --- Scanner -----------------------------------------------------------
+        // A stand-in for the native scanner. Tests push what "the user" does
+        // onto `window.__scan.script`, one entry per scan:
+        //
+        //   { error: 'cancelled' | 'unavailable' | 'denied' | … }  the app answers with this error
+        //   { text }        scanText: the user taps a line
+        //   { value }       scanBarcode with options (or none): one code
+        //   { values }      scanBarcode with `multiple`: "Done" with these codes
+        //   { hold: true }  the scanner stays open (for busy)
+        //
+        // `?oldApp` plays an app that predates the feature: scanText answers
+        // `unknownAction`, scanBarcode ignores its options and answers `{ ok: true }`
+        // (the code only comes through the callback). Like the app it calls the
+        // page callbacks in addition to resolving the promise.
+        const scan = { script: [], open: false, held: null }
+        window.__scan = scan
+        const oldApp = params.has('oldApp')
+
+        async function scanCall(action, payload) {
+          if (!capabilities.includes('camera'))
+            return failure('capability', 'No camera capability.')
+          if (scan.open) return failure('busy', 'Another scan is open.')
+          if (action === 'scanText' && oldApp) return failure('unknownAction')
+          const step = scan.script.shift() || { error: 'cancelled' }
+          if (step.hold) {
+            scan.open = true
+            return new Promise((resolve) => {
+              scan.held = (result) => {
+                scan.open = false
+                resolve(result)
+              }
+            })
+          }
+          if (step.error) return failure(step.error, step.message)
+          const options = payload || {}
+          const plain = !options.multiple && !(options.formats && options.formats.length)
+          if (action === 'scanBarcode' && (oldApp || plain)) {
+            const code = step.value ?? (step.values && step.values[0])
+            if (code !== undefined && window.onBarcodeScanned) window.onBarcodeScanned(code)
+            return { ok: true }
+          }
+          if (action === 'scanText') {
+            if (window.onTextScanned) window.onTextScanned(step.text)
+            return { ok: true, text: step.text }
+          }
+          if (options.multiple) {
+            if (window.onBarcodesScanned) window.onBarcodesScanned(step.values)
+            return { ok: true, values: step.values }
+          }
+          if (window.onBarcodeScanned) window.onBarcodeScanned(step.value)
+          return { ok: true, value: step.value }
+        }
+
         async function call(action, payload) {
           // Every message goes to the harness: it logs it and validates the
           // definitions with the Pydantic models.
           const answer = await send({ ...(payload || {}), action })
           if (action === 'showForm' || action === 'showContent') {
             return answer.ok ? present(action, payload || {}) : answer
+          }
+          if (action === 'scanText' || action === 'scanBarcode') {
+            return answer.ok ? scanCall(action, payload) : answer
           }
           if (action === 'closeSurface' || action === 'surfaceResult') {
             if (!capabilities.includes('nativeForms') && !capabilities.includes('nativeContent')) {
