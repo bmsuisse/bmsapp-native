@@ -22,7 +22,11 @@ export type MenuHeader = (
   | { html: string; css?: string }
   | { image: string }
 ) & {
-  /** Height in points (24–120), default 44. */
+  /**
+   * Design height in points (24–120), default 44. A taller logo is scaled down to the
+   * maximum height of the bar. The header sits flush left in the top bar of the menu, in
+   * place of the web app's name.
+   */
   height?: number
   /** Text for VoiceOver. */
   alt?: string
