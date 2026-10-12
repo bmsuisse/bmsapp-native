@@ -1,6 +1,6 @@
 [project]
 name = "bmsdna-app-native"
-version = "0.4.0"
+version = "0.5.0"
 description = "Backend side of the BMS app: push (APNs), widgets, Live Activities, approvals, native forms and content, and ingest routers to build into your own FastAPI backend. No database or service of its own."
 readme = "README.md"
 license = "MIT"
