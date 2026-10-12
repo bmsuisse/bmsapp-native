@@ -148,6 +148,14 @@
     }
   },
   {
+    "id": "site-docs-1",
+    "kind": "web",
+    "title": "Open tickets",
+    "size": "large",
+    "updatedAt": "2026-10-12T08:00:00Z",
+    "data": { "url": "https://example.com/sites/docs/?widget=1", "scrollable": false }
+  },
+  {
     "id": "new-customer",
     "kind": "action",
     "data": {

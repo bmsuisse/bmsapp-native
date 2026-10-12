@@ -276,6 +276,17 @@ export type ActionData = {
   buttons: WidgetButton[]
 }
 
+/**
+ * The `web` widget: a live page shown 1:1 in the tile. Only OneHub's BrAIn feed may send it;
+ * the app discards it from a web app's own feed, push or bridge. Default size `large`.
+ */
+export type WebData = {
+  /** Must be `https`; the app drops the whole widget otherwise. */
+  url: string
+  /** `false` (default): the page must fit the chosen size. */
+  scrollable?: boolean
+}
+
 type WidgetBase = {
   /** Keep it stable; the app uses it to remember order and visibility. No `/`. */
   id: string
@@ -302,6 +313,7 @@ export type Widget = WidgetBase &
     | { kind: 'text'; data: TextData }
     | { kind: 'action'; data: ActionData }
     | { kind: 'news'; data: NewsData }
+    | { kind: 'web'; data: WebData }
   )
 
 export type WidgetKind = Widget['kind']

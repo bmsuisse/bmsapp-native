@@ -95,6 +95,12 @@ of your web app's approvals. Anything you no longer return disappears.
 | `approveLabel`, `rejectLabel`     |          | Button label, default "Approve"/"Reject"                                     |
 | `approveComment`, `rejectComment` |          | `none`, `optional` or `required`. Default: approve `none`, reject `optional` |
 | `biometric`                       |          | Approve only after Face ID/Touch ID                                          |
+| `conversationId`                  |          | BrAIn only (see below)                                                       |
+
+`conversationId` (also accepted as `conversation_id` on input) is for **BrAIn only**:
+it is the chat the approval arose in. In a chat event the app fills it from the
+stream; in the feed the server must send it. The app uses it to attach the approval
+to the right chat and to open that chat from the inbox. Regular web apps leave it out.
 
 Sorting happens in the app: urgent first, then by deadline, then the oldest
 requests. At most 100 approvals per web app.

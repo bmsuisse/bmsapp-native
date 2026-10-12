@@ -66,6 +66,12 @@ class Approval(_CamelModel):
     details: list[ApprovalDetail] | None = None
     #: Path in your web app for "Open details in the app".
     path: str | None = None
+    #: BrAIn only: the chat this approval arose in. In a chat event the app
+    #: fills it from the stream; in the feed the server must send it. The app
+    #: attaches the approval to that chat and opens the chat from the inbox.
+    #: Accepted as `conversationId` or `conversation_id` on input, sent as
+    #: `conversationId`.
+    conversation_id: str | None = None
     #: Button labels, default "Approve" or "Reject".
     approve_label: str | None = None
     reject_label: str | None = None
