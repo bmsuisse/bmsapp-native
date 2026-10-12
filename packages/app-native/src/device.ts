@@ -8,11 +8,3 @@ import { send, type NativeResult } from './bridge.js'
 export function scanDocument(): Promise<NativeResult> {
   return send('scanDocument')
 }
-
-/**
- * Opens the native barcode/QR scanner. The scanned value arrives via
- * `on('barcodeScanned', value => …)`. Requires `camera`.
- */
-export function scanBarcode(): Promise<NativeResult> {
-  return send('scanBarcode')
-}

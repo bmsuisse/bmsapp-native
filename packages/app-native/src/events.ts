@@ -12,8 +12,12 @@ export type NativeEventMap = {
   actionButtonTap: string
   /** Item in the custom bottom bar tapped. */
   bottomBarTap: string
-  /** Result of `scanBarcode()`. */
+  /** Result of `scanBarcode()` (single scan). */
   barcodeScanned: string
+  /** Result of a multi scan (`scanBarcodes()`): all codes, in scan order. */
+  barcodesScanned: string[]
+  /** Result of `scanText()`. */
+  textScanned: string
   /**
    * The app waits for the page: a native form was submitted or a content action
    * tapped with `wait`. Answer with `surfaceResult`, or let the `onSubmit` /
@@ -29,6 +33,8 @@ const GLOBALS: Record<NativeEvent, string> = {
   actionButtonTap: 'onNativeActionButtonTap',
   bottomBarTap: 'onNativeBottomBarTap',
   barcodeScanned: 'onBarcodeScanned',
+  barcodesScanned: 'onBarcodesScanned',
+  textScanned: 'onTextScanned',
   surfaceAction: 'onNativeSurfaceAction',
 }
 

@@ -29,6 +29,8 @@ import {
   share,
   biometricConfirm,
   scanBarcode,
+  scanBarcodes,
+  scanText,
   setWidgets,
   getAccessToken,
   navigate,
@@ -67,6 +69,11 @@ const { ok } = await biometricConfirm('Approve order?')
 // Scan a barcode; the result arrives as an event
 on('barcodeScanned', (value) => lookup(value))
 await scanBarcode()
+
+// Or let the promise carry the result: several codes, or text from a label
+// (docs/scan-guide.md). Keep a way to type the value in.
+const codes = await scanBarcodes({ formats: ['ean13', 'qr'], max: 20 })
+const serial = await scanText({ pattern: '[A-Z]{2}-\d{4,}' })
 
 // Widgets on the native dashboard
 await setWidgets([{ id: 'open-orders', kind: 'kpi', title: 'Open', data: { value: 12 } }])
@@ -138,24 +145,24 @@ own.
 
 ## Overview
 
-| Area            | Functions                                                                                                  | Capability                                                             |
-| --------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Detection       | `isNativeApp`, `nativeInfo`, `can`                                                                         | –                                                                      |
-| Events          | `on('menuSelect' \| 'actionButtonTap' \| 'bottomBarTap' \| 'barcodeScanned', …)`                           | –                                                                      |
-| Chrome          | `setChrome`, `centerProminentEntry`                                                                        | `customChrome`, `customBottomBar`                                      |
-| Feedback        | `toast`, `haptic`, `setBadge`                                                                              | –                                                                      |
-| System          | `share`, `openExternal`, `biometricConfirm`                                                                | –                                                                      |
-| Camera          | `scanDocument`, `scanBarcode`                                                                              | `camera`                                                               |
-| Widgets         | `setWidgets`, `updateWidget`, `removeWidgets`, `refreshWidgets`                                            | `dashboardWidgets`                                                     |
-| Live Activities | `startLiveActivity`, `updateLiveActivity`, `endLiveActivity`, `getLiveActivities`                          | `liveActivities`                                                       |
-| Approvals       | `refreshApprovals`                                                                                         | `approvals`                                                            |
-| Sign-in         | `getAccessToken`                                                                                           | `identity`                                                             |
-| Other apps      | `navigate`, `callPhone`, `addReminder`, `saveContact`, `toIsoWithOffset`                                   | `deviceApps` (reminder, contact)                                       |
-| Native forms    | `showForm`, `canShowNativeForms`, `formLimitWarnings`                                                      | `nativeForms` (+ `camera` for camera fields)                           |
-| Native content  | `showContent`, `canShowNativeContent`, `contentLimitWarnings`                                              | `nativeContent` (+ `deviceApps` for `saveContact`/`addReminder` steps) |
-| Surfaces        | `closeSurface`, `surfaceResult`, `isNativeSurfaceUnsupported`, `on('surfaceAction', …)`, `onSurfaceAction` | `nativeForms` or `nativeContent`                                       |
-| Testing         | `sendTestNotification`                                                                                     | `notifications`                                                        |
-| Raw access      | `call`, `post`, `send`                                                                                     | –                                                                      |
+| Area            | Functions                                                                                                              | Capability                                                             |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Detection       | `isNativeApp`, `nativeInfo`, `can`                                                                                     | –                                                                      |
+| Events          | `on('menuSelect' \| 'actionButtonTap' \| 'bottomBarTap' \| 'barcodeScanned' \| 'barcodesScanned' \| 'textScanned', …)` | –                                                                      |
+| Chrome          | `setChrome`, `centerProminentEntry`                                                                                    | `customChrome`, `customBottomBar`                                      |
+| Feedback        | `toast`, `haptic`, `setBadge`                                                                                          | –                                                                      |
+| System          | `share`, `openExternal`, `biometricConfirm`                                                                            | –                                                                      |
+| Camera          | `scanDocument`, `scanBarcode`, `scanBarcodes`, `scanText`, `canScan` ([guide](../../docs/scan-guide.md))               | `camera`                                                               |
+| Widgets         | `setWidgets`, `updateWidget`, `removeWidgets`, `refreshWidgets`                                                        | `dashboardWidgets`                                                     |
+| Live Activities | `startLiveActivity`, `updateLiveActivity`, `endLiveActivity`, `getLiveActivities`                                      | `liveActivities`                                                       |
+| Approvals       | `refreshApprovals`                                                                                                     | `approvals`                                                            |
+| Sign-in         | `getAccessToken`                                                                                                       | `identity`                                                             |
+| Other apps      | `navigate`, `callPhone`, `addReminder`, `saveContact`, `toIsoWithOffset`                                               | `deviceApps` (reminder, contact)                                       |
+| Native forms    | `showForm`, `canShowNativeForms`, `formLimitWarnings`                                                                  | `nativeForms` (+ `camera` for camera fields)                           |
+| Native content  | `showContent`, `canShowNativeContent`, `contentLimitWarnings`                                                          | `nativeContent` (+ `deviceApps` for `saveContact`/`addReminder` steps) |
+| Surfaces        | `closeSurface`, `surfaceResult`, `isNativeSurfaceUnsupported`, `on('surfaceAction', …)`, `onSurfaceAction`             | `nativeForms` or `nativeContent`                                       |
+| Testing         | `sendTestNotification`                                                                                                 | `notifications`                                                        |
+| Raw access      | `call`, `post`, `send`                                                                                                 | –                                                                      |
 
 ## License
 
