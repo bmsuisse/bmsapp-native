@@ -32,9 +32,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 #: Current version of the widget format (field `schema` in the feed).
@@ -177,6 +178,26 @@ class NewsData(_CamelModel):
     #: to deliver more, so that rare channels also show something in their tab.
     items: list[NewsItem] = []
     empty_text: str | None = None
+
+
+class WebData(_CamelModel):
+    """Data of the `web` widget: a live web page shown 1:1 in the tile.
+
+    Only OneHub's BrAIn feed may send this kind: the app discards it from a
+    web app's own feed, push or bridge (see the widgets guide)."""
+
+    #: Must be `https`; the app drops the whole widget otherwise.
+    url: str
+    #: `False`: the page must fit the tile's size, it does not scroll.
+    scrollable: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, value: str) -> str:
+        parts = urlsplit(value.strip())
+        if parts.scheme.lower() != "https" or not parts.netloc:
+            raise ValueError("url must be an https URL")
+        return value
 
 
 class ActionOption(_CamelModel):
@@ -521,6 +542,30 @@ class NewsWidget(_WidgetBase):
     data: NewsData
 
 
+class WebWidget(_WidgetBase):
+    """Only valid in OneHub's BrAIn feed, default size `large`. The sender
+    chooses `size` (`small` to `xlarge`); the user cannot change it."""
+
+    kind: Literal["web"] = "web"
+    data: WebData
+
+
+class SiteWidgetEntry(_CamelModel):
+    """One entry of a OneHub site's `widgets.json` manifest. A OneHub
+    convention, not part of the app contract (see the widgets guide)."""
+
+    #: Unique within the manifest; `?widget=<n>` selects the compact view.
+    n: int = Field(ge=1, le=99)
+    title: str = Field(min_length=1, max_length=60)
+    size: Literal["small", "medium", "large", "tall", "xlarge"] = "medium"
+    scrollable: bool = False
+
+
+#: Limits of a OneHub site manifest: entries and bytes.
+SITE_WIDGETS_MAX_ENTRIES = 20
+SITE_WIDGETS_MAX_BYTES = 16 * 1024
+
+
 Widget = Annotated[
     KpiWidget
     | StatsWidget
@@ -529,7 +574,8 @@ Widget = Annotated[
     | ProgressWidget
     | TextWidget
     | ActionWidget
-    | NewsWidget,
+    | NewsWidget
+    | WebWidget,
     Field(discriminator="kind"),
 ]
 

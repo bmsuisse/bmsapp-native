@@ -61,7 +61,7 @@ sent, detail = await send_push(
 A direct function call, not an endpoint — call it from anywhere in your
 own code as soon as you have an APNs device token (you get it
 from `create_ingest_router()`, see below). Raises `RuntimeError` if the
-`APNS_*` environment variables are missing or the auth key cannot be found or
+APNs credentials are missing (no `config`, provider or `APNS_*` environment variables) or the auth key cannot be found or
 is not PEM text —
 catch it if you call this for several devices in a loop.
 
@@ -685,6 +685,42 @@ Once, in the Apple Developer Portal:
    - `APNS_BUNDLE_ID` — the app's bundle ID
    - `APNS_USE_SANDBOX` — `true` for debug builds from Xcode, `false` for
      TestFlight/App Store
+
+### Credentials at runtime (database, admin UI)
+
+If the key is not in the environment but, say, encrypted in your database
+and an admin may change it without a restart, pass the credentials
+yourself. Every `send_*` function takes an optional `config`:
+
+```python
+from bmsdna.app_native import ApnsConfig, send_push, set_apns_config_provider
+
+config = ApnsConfig(
+    key=pem_text,          # contents of the .p8 file (`
+` escapes are accepted)
+    key_id="ABC123DEFG",
+    team_id="TEAM123456",
+    bundle_id="ch.example.app",
+    use_sandbox=False,
+)
+await send_push(device_token=token, title="Hi", body="...", config=config)
+
+# or once at startup: called before every send, so keep it cheap
+async def load_apns_config() -> ApnsConfig:
+    return await my_settings.apns()  # e.g. cached for a few seconds
+
+set_apns_config_provider(load_apns_config)  # None removes it again
+```
+
+Per send, the first match wins: explicit `config` > provider > `APNS_*`
+environment variables. Nothing is cached for good: clients are cached per
+credential set (key ID, team, bundle ID, sandbox flag and a SHA-256 of the
+key), so after a key change the next send builds a new client and drops the
+old one. `ApnsConfig` is immutable and keeps the key out of its `repr`. A
+missing configuration still raises `RuntimeError`.
+`live_activity_topic(config)` takes the bundle ID from the config; without
+one it reads `APNS_BUNDLE_ID` (a provider is async, so it is not consulted
+there).
 
 ### Storing the key in production
 

@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 
+from .apns import ApnsConfig, _client_for, _resolve_config, live_activity_topic
 from .widgets import WidgetRequestContext
 
 #: Name of the activity's Swift type in the app — required for push-to-start.
@@ -207,16 +208,17 @@ def build_live_activity_start_message(
 # --- Delivery --------------------------------------------------------------
 
 
-async def _send(push_token: str, message: dict[str, Any], priority: int) -> tuple[bool, str | None]:
-    from .apns import _get_client, live_activity_topic
-
-    client = _get_client()
+async def _send(
+    push_token: str, message: dict[str, Any], priority: int, config: ApnsConfig | None
+) -> tuple[bool, str | None]:
+    config = await _resolve_config(config)
+    client = _client_for(config)
     request = NotificationRequest(
         device_token=push_token,
         message=message,
         push_type=PushType.LIVEACTIVITY,
         priority=priority,
-        apns_topic=live_activity_topic(),
+        apns_topic=live_activity_topic(config),
     )
     response = await client.send_notification(request)
     return response.is_successful, getattr(response, "description", None)
@@ -230,6 +232,7 @@ async def send_live_activity_update(
     alert_body: str | None = None,
     stale_at: datetime | None = None,
     priority: Literal[5, 10] = 10,
+    config: ApnsConfig | None = None,
 ) -> tuple[bool, str | None]:
     """New state for a running activity (`push_token` from the activity's
     `token` event).
@@ -250,7 +253,7 @@ async def send_live_activity_update(
         alert_body=alert_body,
         stale_at=stale_at,
     )
-    return await _send(push_token, message, priority)
+    return await _send(push_token, message, priority, config)
 
 
 async def send_live_activity_end(
@@ -258,13 +261,14 @@ async def send_live_activity_end(
     push_token: str,
     state: LiveActivityState | None = None,
     dismiss_at: datetime | None = None,
+    config: ApnsConfig | None = None,
 ) -> tuple[bool, str | None]:
     """Ends an activity. With `state` it shows the final state until it
     disappears (e.g. "Picked up"). Without `dismiss_at` iOS keeps it on the
     Lock Screen for up to 4 more hours; with a point in time in the past it
     disappears immediately."""
     message = build_live_activity_message(event="end", state=state, dismiss_at=dismiss_at)
-    return await _send(push_token, message, 10)
+    return await _send(push_token, message, 10, config)
 
 
 async def send_live_activity_start(
@@ -275,6 +279,7 @@ async def send_live_activity_start(
     alert_title: str | None = None,
     alert_body: str | None = None,
     stale_at: datetime | None = None,
+    config: ApnsConfig | None = None,
 ) -> tuple[bool, str | None]:
     """Starts an activity entirely without the app (from iOS 17.2 on, with
     the token from the `push_to_start_token` event). Afterwards the app
@@ -287,4 +292,4 @@ async def send_live_activity_start(
         alert_body=alert_body,
         stale_at=stale_at,
     )
-    return await _send(push_to_start_token, message, 10)
+    return await _send(push_to_start_token, message, 10, config)

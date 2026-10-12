@@ -194,7 +194,7 @@ as JS `Date`.
 ```jsonc
 {
   "id": "open-orders", // Required, unique within your web app, no "/". Keep it stable!
-  "kind": "kpi", // Required: kpi | stats | list | chart | progress | text | action | news
+  "kind": "kpi", // Required: kpi | stats | list | chart | progress | text | action | news (| web: BrAIn only)
   "size": "small", // small (half width) | medium | large | tall | xlarge (full width). Default depends on kind
   "title": "Open orders",
   "icon": "shippingbox", // SF Symbol, default: your web app's icon
@@ -589,6 +589,63 @@ app.include_router(
 
 Without a network connection or on an error, the list shows a message.
 All other inputs are kept.
+
+### `web` – a live page in the tile (default `large`, BrAIn/OneHub only)
+
+> **Regular web apps must not send this kind.** The app accepts `web` ONLY
+> from BrAIn/OneHub and discards it from a web app's own feed, push or
+> bridge. It is documented here because the format is part of the widget
+> union.
+
+```json
+{
+  "id": "docs-1",
+  "kind": "web",
+  "size": "large",
+  "data": { "url": "https://example.com/sites/docs/?widget=1", "scrollable": false }
+}
+```
+
+| `data` field | Required | Meaning                                                                       |
+| ------------ | -------- | ----------------------------------------------------------------------------- |
+| `url`        | ✓        | The page. Must be `https`; otherwise the app drops the whole widget.          |
+| `scrollable` |          | Default `false`: the page must fit the chosen size. `true`: the page scrolls. |
+
+The tile shows the page 1:1, without header or border, and every tap goes to
+the page. Sizes are `small`, `medium`, `large` (default), `tall` or `xlarge`;
+the sender chooses, the user cannot change it. With `scrollable=false`, design
+the page for exactly that tile size. In Python: `WebWidget` with `WebData`
+(`url`, `scrollable`).
+
+#### OneHub site widgets (OneHub convention, not part of the app contract)
+
+OneHub sites can offer compact widget views of their own page. This is a
+convention between OneHub and its sites; the app only ever sees the resulting
+`web` widget.
+
+- **Manifest** `/sites/<site_id>/widgets.json`: a JSON array with at most 20
+  entries and 16 KB. Entry:
+  `{"n": 1, "title": "Open tickets", "size": "medium", "scrollable": false}`
+  - `n`: 1 to 99, unique within the manifest
+  - `title`: at most 60 characters
+  - `size`: `small`, `medium`, `large`, `tall` or `xlarge` (default `medium`)
+  - `scrollable`: default `false`
+
+  A broken entry is skipped, the rest still count. A missing or unreadable
+  manifest means no widgets.
+
+- **Compact view:** `?widget=<n>` on the site's own page shows the compact
+  widget view for that `n`.
+- **Address:** OneHub builds the widget address
+  `<sites base>/sites/<site_id>/?widget=<n>` itself; a caller never supplies it.
+- **Feed entry** (at most 8 per user):
+  `{"id": "<site_id>-<n>", "kind": "web", "title": "…", "size": "…", "data": {"url": "…", "scrollable": false}, "updatedAt": "…"}`
+- **Refresh:** the tile is a live page that the app reloads when it returns to
+  the app; the page re-runs its query itself.
+
+The toolkit offers `SiteWidgetEntry` (`n`, `title`, `size`, `scrollable`, with
+the limits above) plus `SITE_WIDGETS_MAX_ENTRIES` and `SITE_WIDGETS_MAX_BYTES`
+to validate a manifest entry.
 
 ### Buttons (in `action` and `list`)
 

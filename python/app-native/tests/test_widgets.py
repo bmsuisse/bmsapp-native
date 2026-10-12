@@ -593,3 +593,70 @@ def test_widget_forms_accept_the_new_field_types_and_properties() -> None:
     assert dumped["fields"][1]["patternMessage"] == "Invalid"
     assert dumped["fields"][2] == {"id": "seats", "type": "stepper", "min": 1, "max": 9, "step": 2}
     assert dumped["fields"][3]["maxDimension"] == 1024
+
+
+# --- web widget ------------------------------------------------------------
+
+
+def test_web_widget_defaults_and_wire_format() -> None:
+    from bmsdna.app_native import WebData, WebWidget, dump_widgets
+
+    widget = WebWidget(
+        id="site-docs-1", title="Tickets", data=WebData(url="https://example.com/s/")
+    )
+
+    assert widget.data.scrollable is False
+    assert widget.size is None  # the app's default for `web` is large
+    assert dump_widgets([widget])[0]["data"] == {
+        "url": "https://example.com/s/",
+        "scrollable": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "url", ["http://example.com/", "javascript:alert(1)", "/relative", "https://", "", "ftp://x.y"]
+)
+def test_web_data_requires_https(url: str) -> None:
+    from bmsdna.app_native import WebData
+
+    with pytest.raises(ValueError, match="https"):
+        WebData(url=url)
+
+
+def test_web_widget_in_feed_union() -> None:
+    from bmsdna.app_native import WebWidget, WidgetFeed
+
+    feed = WidgetFeed.model_validate(
+        {
+            "widgets": [
+                {
+                    "id": "a",
+                    "kind": "web",
+                    "size": "xlarge",
+                    "required": False,
+                    "data": {"url": "https://example.com/", "scrollable": True},
+                }
+            ]
+        }
+    )
+
+    (widget,) = feed.widgets
+    assert isinstance(widget, WebWidget)
+    assert widget.size == "xlarge"
+    assert widget.data.scrollable is True
+
+
+def test_site_widget_entry_limits() -> None:
+    from bmsdna.app_native import SiteWidgetEntry
+
+    entry = SiteWidgetEntry.model_validate({"n": 1, "title": "Open"})
+    assert (entry.size, entry.scrollable) == ("medium", False)
+    for bad in (
+        {"n": 0, "title": "x"},
+        {"n": 100, "title": "x"},
+        {"n": 1, "title": "x" * 61},
+        {"n": 1, "title": ""},
+        {"n": 1, "title": "x", "size": "huge"},
+    ):
+        with pytest.raises(ValueError):
+            SiteWidgetEntry.model_validate(bad)

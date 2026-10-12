@@ -2,6 +2,8 @@ from .actions import NotificationActionReceived, create_notification_action_rout
 from .apns import (
     MAX_INLINE_WIDGETS_BYTES,
     PERMANENTLY_INVALID_TOKEN_REASONS,
+    ApnsConfig,
+    ApnsConfigProvider,
     InterruptionLevel,
     build_alert_message,
     build_approvals_update_message,
@@ -13,6 +15,7 @@ from .apns import (
     send_push,
     send_silent_push,
     send_widget_update,
+    set_apns_config_provider,
 )
 from .approvals import (
     Approval,
@@ -128,6 +131,8 @@ from .widgets import (
     MAX_SCAN_PAGES,
     MIN_PHOTO_DIMENSION,
     REPEAT_INNER_FIELD_TYPES,
+    SITE_WIDGETS_MAX_BYTES,
+    SITE_WIDGETS_MAX_ENTRIES,
     WIDGET_SCHEMA_VERSION,
     ActionButton,
     ActionCondition,
@@ -152,6 +157,7 @@ from .widgets import (
     NewsWidget,
     ProgressData,
     ProgressWidget,
+    SiteWidgetEntry,
     StatItem,
     StatsData,
     StatsWidget,
@@ -159,6 +165,8 @@ from .widgets import (
     TextData,
     TextWidget,
     Trend,
+    WebData,
+    WebWidget,
     Widget,
     WidgetActionReceived,
     WidgetActionResult,
@@ -174,6 +182,8 @@ from .widgets import (
 
 __all__ = [
     "ATTRIBUTES_TYPE",
+    "SITE_WIDGETS_MAX_BYTES",
+    "SITE_WIDGETS_MAX_ENTRIES",
     "DEFAULT_MAX_DOCUMENT_BYTES",
     "MAX_BLOCK_NESTING",
     "MAX_BUTTONS_PER_BLOCK",
@@ -208,6 +218,8 @@ __all__ = [
     "ActionOption",
     "ActionPage",
     "ActionWidget",
+    "ApnsConfig",
+    "ApnsConfigProvider",
     "Approval",
     "ApprovalDecisionReceived",
     "ApprovalDecisionResult",
@@ -285,6 +297,7 @@ __all__ = [
     "SpacerBlock",
     "StatItem",
     "StatsBlock",
+    "SiteWidgetEntry",
     "StatsData",
     "StatsWidget",
     "SurfaceLimitError",
@@ -296,6 +309,8 @@ __all__ = [
     "Tint",
     "Trend",
     "VideoBlock",
+    "WebData",
+    "WebWidget",
     "Widget",
     "WidgetActionReceived",
     "WidgetActionResult",
@@ -334,4 +349,5 @@ __all__ = [
     "send_push",
     "send_silent_push",
     "send_widget_update",
+    "set_apns_config_provider",
 ]

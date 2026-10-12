@@ -3,7 +3,14 @@
 // checks that they match the JSON files the Python side validates as well.
 
 import { describe, expect, it } from 'vitest'
-import type { LiveActivityState, NativeContentDef, NativeFormDef, Widget } from '../src/index.js'
+import type {
+  Approval,
+  LiveActivityState,
+  NativeContentDef,
+  NativeFormDef,
+  Widget,
+} from '../src/index.js'
+import approvalsJson from '../../../contract-fixtures/approvals.json'
 import widgetsJson from '../../../contract-fixtures/widgets.json'
 import liveActivityStateJson from '../../../contract-fixtures/live-activity-state.json'
 import nativeFormJson from '../../../contract-fixtures/native-form.json'
@@ -149,6 +156,14 @@ const widgets: Widget[] = [
     },
   },
   {
+    id: 'site-docs-1',
+    kind: 'web',
+    title: 'Open tickets',
+    size: 'large',
+    updatedAt: '2026-10-12T08:00:00Z',
+    data: { url: 'https://example.com/sites/docs/?widget=1', scrollable: false },
+  },
+  {
     id: 'new-customer',
     kind: 'action',
     data: {
@@ -196,6 +211,31 @@ const widgets: Widget[] = [
     },
   },
 ]
+
+const approvals: { approvals: Approval[] } = {
+  approvals: [
+    {
+      id: 'vac-17',
+      title: 'Vacation request',
+      subtitle: 'Anna Muster · 3–7 November',
+      category: 'Vacation',
+      amount: '5 days',
+      requester: 'Anna Muster',
+      createdAt: '2026-09-26T08:00:00Z',
+      dueAt: '2026-10-01T12:00:00Z',
+      urgent: false,
+      icon: 'sun.max.fill',
+      details: [{ label: 'Period', value: 'Mon 3 to Fri 7 November' }],
+      path: '/vacation/17',
+      approveLabel: 'Approve',
+      rejectLabel: 'Reject',
+      approveComment: 'none',
+      rejectComment: 'required',
+      biometric: false,
+    },
+    { id: 'brain-42', title: 'Send the offer to the customer?', conversationId: 'conv-8f3a' },
+  ],
+}
 
 const liveActivityState: LiveActivityState = {
   title: 'Order is being packed',
@@ -539,6 +579,10 @@ const nativeContent: NativeContentDef = {
 describe('contract-fixtures', () => {
   it('widgets match widgets.json', () => {
     expect(widgets).toEqual(widgetsJson)
+  })
+
+  it('approvals match approvals.json', () => {
+    expect(approvals).toEqual(approvalsJson)
   })
 
   it('LiveActivityState matches live-activity-state.json', () => {

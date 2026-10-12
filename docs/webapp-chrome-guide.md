@@ -202,7 +202,8 @@ problem.
 
 Without `menuHeader`, the menu shows a tile at the top with the web app's
 icon, name and group. With `menuHeader`, your logo appears there instead,
-centered and without a card background:
+flush left in the top bar of the menu, in place of the web app's name, and
+without a card background:
 
 ```js
 // One wordmark, built into the app and animated:
@@ -222,7 +223,7 @@ menuHeader: { html: "<span class='logo'>…</span>", css: ".logo { … }" },
 | `suffix`       | string | no                           | Text after "One" in the One logo, default: name of the web app. With long texts, the logo shrinks so it fits the width |
 | `html` / `css` | string |                              | Custom markup and CSS. **No JavaScript** (it doesn't run); CSS animations do run                                       |
 | `image`        | string |                              | Image URL. Loads with your web app's cookies                                                                           |
-| `height`       | number | no, default `44`             | Height of the header in points (24–120)                                                                                |
+| `height`       | number | no, default `44`             | Design height in points (24–120); a taller logo is scaled down to the bar's maximum height                             |
 | `alt`          | string | no                           | Text for VoiceOver, default: the wordmark or the name of the web app                                                   |
 
 Like the menu, it requires `.customChrome`. Tapping the logo does nothing.

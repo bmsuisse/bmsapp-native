@@ -28,6 +28,7 @@ def _approval(**overrides: Any) -> Approval:
         "details": [ApprovalDetail(label="Deputy", value="Beat Beispiel")],
         "reject_comment": "required",
         "biometric": True,
+        "conversation_id": "conv-1",
     }
     return Approval(**(fields | overrides))
 
@@ -68,6 +69,7 @@ async def test_feed_serializes_by_alias_and_drops_none() -> None:
                 "details": [{"label": "Deputy", "value": "Beat Beispiel"}],
                 "rejectComment": "required",
                 "biometric": True,
+                "conversationId": "conv-1",
             }
         ]
     }
@@ -184,3 +186,14 @@ def test_approvals_update_message_is_silent_refresh() -> None:
         "webapp_id": "hr-tool",
         "approvals_refresh": True,
     }
+
+
+def test_conversation_id_wire_name_and_both_input_spellings() -> None:
+    from bmsdna.app_native import Approval
+
+    camel = Approval.model_validate({"id": "a", "title": "t", "conversationId": "c1"})
+    snake = Approval.model_validate({"id": "a", "title": "t", "conversation_id": "c1"})
+
+    assert camel.conversation_id == snake.conversation_id == "c1"
+    assert camel.model_dump(by_alias=True, exclude_none=True)["conversationId"] == "c1"
+    assert Approval(id="a", title="t").conversation_id is None

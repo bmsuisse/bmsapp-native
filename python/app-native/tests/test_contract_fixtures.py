@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from bmsdna.app_native import LiveActivityState, NativeContent, NativeForm, Widget
+from bmsdna.app_native import ApprovalFeed, LiveActivityState, NativeContent, NativeForm, Widget
 from pydantic import TypeAdapter
 
 FIXTURES = Path(__file__).resolve().parents[3] / "contract-fixtures"
@@ -25,6 +25,12 @@ def test_widgets_round_trip() -> None:
     widgets = adapter.validate_python(raw)
     dumped = adapter.dump_python(widgets, mode="json", by_alias=True, exclude_unset=True)
     assert dumped == raw
+
+
+def test_approvals_round_trip() -> None:
+    raw = _load("approvals.json")
+    feed = ApprovalFeed.model_validate(raw)
+    assert feed.model_dump(mode="json", by_alias=True, exclude_unset=True) == raw
 
 
 def test_live_activity_state_round_trip() -> None:
