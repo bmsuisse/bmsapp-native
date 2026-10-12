@@ -3,7 +3,7 @@
 This guide is for teams that embed their web app in the BMS app and want to
 control their own native UI (hamburger menu, action buttons, bottom bar) on
 top of it. Technical background and the other bridge actions
-(document/barcode scanning): see [README.md](../README.md).
+(document/barcode scanning): see [README.md](../README.md). Text scan and several barcodes at once (`scanText`, `scanBarcodes`, `scanBarcode` with options): [scan-guide.md](scan-guide.md).
 
 ## Presentation: every web app opens full screen
 

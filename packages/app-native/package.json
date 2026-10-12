@@ -1,6 +1,6 @@
 {
   "name": "@bmsuisse/app-native",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Web app side of the BMS app: typed calls to window.BMSNative (chrome, toast, share, scan, widgets, Live Activities, approvals, native forms and content) with browser fallbacks.",
   "type": "module",
   "license": "MIT",

@@ -11,6 +11,7 @@ import type {
   NavigatePayload,
   SaveContactPayload,
 } from './deviceActions.js'
+import { isDevelopment, warn } from './dev.js'
 import { on } from './events.js'
 import type { ActionField, ChartData, KpiData, ProgressData, StatsData, Value } from './widgets.js'
 
@@ -650,20 +651,6 @@ export function contentLimitWarnings(def: NativeContentDef): string[] {
     )
   }
   return walk.warnings
-}
-
-/** Development build: not a bundle with `NODE_ENV=production` / Vite's `PROD`. */
-function isDevelopment(): boolean {
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-    ?.env
-  if (env?.NODE_ENV === 'production') return false
-  const meta = (import.meta as unknown as { env?: { PROD?: boolean } }).env
-  return meta?.PROD !== true
-}
-
-function warn(kind: string, warnings: string[]): void {
-  if (typeof console === 'undefined') return
-  for (const warning of warnings) console.warn(`[@bmsuisse/app-native] ${kind}: ${warning}`)
 }
 
 // --- Round trip --------------------------------------------------------------

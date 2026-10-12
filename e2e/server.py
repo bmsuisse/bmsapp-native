@@ -210,7 +210,30 @@ def _surface(action: str, body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True}
 
 
+def _scan(action: str, body: dict[str, Any]) -> dict[str, Any]:
+    """`scanText`/`scanBarcode`: the app checks the options (`invalid`); the
+    scanner itself is played by the page's fake bridge."""
+    invalid = {"ok": False, "error": "invalid", "message": "Invalid scan options."}
+    if action == "scanText":
+        pattern = body.get("pattern")
+        if pattern is not None and (not isinstance(pattern, str) or len(pattern) > 200):
+            return invalid
+        return {"ok": True}
+    formats = body.get("formats")
+    if "formats" in body and not (
+        isinstance(formats, list) and all(isinstance(f, str) for f in formats)
+    ):
+        return invalid
+    if body.get("multiple") is True and "max" in body:
+        maximum = body["max"]
+        if not isinstance(maximum, int) or isinstance(maximum, bool) or not 1 <= maximum <= 200:
+            return invalid
+    return {"ok": True}
+
+
 def _answer(action: str, body: dict[str, Any]) -> dict[str, Any]:
+    if action in ("scanText", "scanBarcode"):
+        return _scan(action, body)
     if action in ("showForm", "showContent"):
         return _surface(action, body)
     if action == "setWidgets":
