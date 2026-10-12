@@ -106,7 +106,14 @@ jobs:
           VERSION: ${{ needs.plan.outputs.npm_version }}
         run: |
           git tag "@bmsuisse/app-native@$VERSION"
-          git push origin "@bmsuisse/app-native@$VERSION"
+          # The npm and PyPI jobs push tags at the same time; GitHub sometimes
+          # rejects one of them with a transient error, so retry.
+          for attempt in 1 2 3 4; do
+            git push origin "@bmsuisse/app-native@$VERSION" && exit 0
+            echo "Tag push failed (attempt $attempt), retrying" >&2
+            sleep $((attempt * 5))
+          done
+          exit 1
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -153,7 +160,14 @@ jobs:
           VERSION: ${{ needs.plan.outputs.python_version }}
         run: |
           git tag "bmsdna-app-native@$VERSION"
-          git push origin "bmsdna-app-native@$VERSION"
+          # The npm and PyPI jobs push tags at the same time; GitHub sometimes
+          # rejects one of them with a transient error, so retry.
+          for attempt in 1 2 3 4; do
+            git push origin "bmsdna-app-native@$VERSION" && exit 0
+            echo "Tag push failed (attempt $attempt), retrying" >&2
+            sleep $((attempt * 5))
+          done
+          exit 1
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
