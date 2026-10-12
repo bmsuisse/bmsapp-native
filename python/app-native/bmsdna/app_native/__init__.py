@@ -2,6 +2,8 @@ from .actions import NotificationActionReceived, create_notification_action_rout
 from .apns import (
     MAX_INLINE_WIDGETS_BYTES,
     PERMANENTLY_INVALID_TOKEN_REASONS,
+    ApnsConfig,
+    ApnsConfigProvider,
     InterruptionLevel,
     build_alert_message,
     build_approvals_update_message,
@@ -13,6 +15,7 @@ from .apns import (
     send_push,
     send_silent_push,
     send_widget_update,
+    set_apns_config_provider,
 )
 from .approvals import (
     Approval,
@@ -208,6 +211,8 @@ __all__ = [
     "ActionOption",
     "ActionPage",
     "ActionWidget",
+    "ApnsConfig",
+    "ApnsConfigProvider",
     "Approval",
     "ApprovalDecisionReceived",
     "ApprovalDecisionResult",
@@ -334,4 +339,5 @@ __all__ = [
     "send_push",
     "send_silent_push",
     "send_widget_update",
+    "set_apns_config_provider",
 ]
