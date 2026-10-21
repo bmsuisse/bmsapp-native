@@ -17,8 +17,9 @@ python/app-native/     bmsdna-app-native      (Python, uv; import: bmsdna.app_na
 contract-fixtures/     shared example payloads, tested by both sides
 e2e/                   Playwright: the built npm package in a browser against the Python models
 docs/                  one guide per topic (widgets, chrome, native forms and content, Live Activities, …)
-skills/                agent skill for projects that use the packages
 ```
+
+The agent skill for projects that use the packages (`bmsapp-native`, part of the `coding` plugin) lives in [bmsuisse/skills](https://github.com/bmsuisse/skills/tree/main/skills/bmsapp-native), together with all other BMS skills.
 
 The message format is maintained by hand on both sides. `contract-fixtures/` and the browser tests in `e2e/` keep them in sync, see [contract-fixtures/README.md](contract-fixtures/README.md) and [e2e/README.md](e2e/README.md).
 
