@@ -20,6 +20,12 @@ What is checked (an OIDC v2.0 ID token, not an access token of an API):
 - `exp`/`nbf` with a small tolerance,
 - `oid` and `email` or `preferred_username` are present.
 
+Access-token mode (`EntraTokenVerifier.for_api()` or `ENTRA_API_CLIENT_ID`)
+is the other variant: the app then sends an access token for
+`api://<api-client-id>/access_as_user`. `aud` is the API's client ID (or
+`api://<client-id>`), `iss` may be the v1.0 or v2.0 issuer, and `scp` must
+contain `access_as_user` (missing scope: 403, ID token or foreign audience: 401).
+
 What the user may do in your web app stays your business (roles, groups,
 your own user table, see `resolve_user`): the token only proves who it is.
 
@@ -52,6 +58,11 @@ logger = logging.getLogger("bmsdna.app_native.entra")
 JWKS_URL = "https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"
 #: `iss` of the v2.0 ID tokens of a tenant.
 ISSUER = "https://login.microsoftonline.com/{tenant}/v2.0"
+#: `iss` of the v1.0 tokens of a tenant (access tokens of an API with
+#: `accessTokenAcceptedVersion` unset or 1).
+ISSUER_V1 = "https://sts.windows.net/{tenant}/"
+#: The scope the app requests for your API.
+DEFAULT_SCOPE = "access_as_user"
 
 _TENANT_ID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
 #: A real ID token is about 1–3 KB. Anything far beyond is not worth parsing.
@@ -70,6 +81,14 @@ class EntraTokenError(Exception):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class EntraScopeError(EntraTokenError):
+    """The token is genuine but was not granted the required scope. Answer 403,
+    not 401: a renewed token will not help."""
+
+    def __init__(self) -> None:
+        super().__init__("scope")
 
 
 class EntraKeysUnavailableError(EntraTokenError):
@@ -94,6 +113,9 @@ class EntraUser:
     tenant_id: str
     #: Display name, if the token has one.
     name: str | None = None
+    #: User principal name (`upn` claim), if the token has one. Access tokens
+    #: of v1.0 carry it; it can differ from `email`.
+    upn: str | None = None
 
 
 def _text(value: object) -> str | None:
@@ -262,6 +284,14 @@ class EntraTokenVerifier:
     - `tenant_id`: directory (tenant) ID, a GUID. `common`, `organizations`
       and `consumers` are refused: they would accept tokens of any tenant.
     - `audience`: the accepted `aud`, one client ID or several.
+    - `required_scope`: switches to **access-token mode**. The token must then
+      be an access token for your own API (the app requests
+      `api://<api-client-id>/access_as_user`): `aud` is one of `audience` (the
+      API's client ID and/or `api://<client-id>`), `iss` may be the v1.0 or the
+      v2.0 issuer of the tenant, and `scp` must contain this scope. An ID token
+      (no `scp`) is refused with 401; a token without the scope with
+      `EntraScopeError` (403). Without it, only ID tokens are accepted.
+      `for_api()` builds the audiences for you.
     - `leeway`: seconds of tolerance for `exp`, `nbf` and `iat`.
     - `jwks_cache_seconds`: how long Microsoft's signing keys are kept.
     - `jwks_min_refresh_seconds`: at most one reload per this time, whatever
@@ -280,6 +310,7 @@ class EntraTokenVerifier:
         *,
         tenant_id: str,
         audience: str | Sequence[str],
+        required_scope: str | None = None,
         leeway: float = 60.0,
         jwks_cache_seconds: float = 3600.0,
         jwks_min_refresh_seconds: float = 60.0,
@@ -299,8 +330,16 @@ class EntraTokenVerifier:
         tenant_id = tenant_id.lower()
         self._tenant_id = tenant_id
         self._audiences = audiences
+        if required_scope is not None and (not required_scope.strip() or " " in required_scope):
+            raise ValueError("required_scope must be one scope name")
+        self._required_scope = required_scope
         self._leeway = leeway
         self._issuer = ISSUER.format(tenant=tenant_id)
+        self._issuers = (
+            [self._issuer, ISSUER_V1.format(tenant=tenant_id)]
+            if required_scope is not None
+            else [self._issuer]
+        )
         self._keys = _SigningKeys(
             fetch_jwks or _fetcher(JWKS_URL.format(tenant=tenant_id)),
             ttl=jwks_cache_seconds,
@@ -310,18 +349,67 @@ class EntraTokenVerifier:
         )
 
     @classmethod
+    def for_api(
+        cls,
+        *,
+        tenant_id: str,
+        api_client_id: str,
+        allowed_audiences: Sequence[str] = (),
+        scope: str = DEFAULT_SCOPE,
+        **options: Any,
+    ) -> EntraTokenVerifier:
+        """Access-token mode for your API: accepts `aud` = `api_client_id`,
+        `api://<api_client_id>` and any of `allowed_audiences`, and requires
+        `scope` in `scp`. `options` are passed on to the constructor."""
+        client_id = api_client_id.strip()
+        if not client_id:
+            raise ValueError("api_client_id must be the client ID of your API")
+        audiences = [client_id, f"api://{client_id}", *(a.strip() for a in allowed_audiences)]
+        return cls(
+            tenant_id=tenant_id,
+            audience=list(dict.fromkeys(a for a in audiences if a)),
+            required_scope=scope,
+            **options,
+        )
+
+    @classmethod
     def from_env(
         cls, environ: Mapping[str, str] | None = None, **options: Any
     ) -> EntraTokenVerifier:
-        """From `ENTRA_TENANT_ID` and `ENTRA_AUDIENCE` (several client IDs
-        separated by commas). `options` are passed on to the constructor."""
+        """From the environment. Two modes, chosen by the variables:
+
+        - **Access token** (`access_as_user`): `ENTRA_TENANT_ID`,
+          `ENTRA_API_CLIENT_ID` and optionally `ENTRA_ALLOWED_AUDIENCES`
+          (comma-separated, added to the client ID and `api://<client-id>`).
+        - **ID token**: `ENTRA_TENANT_ID` and `ENTRA_AUDIENCE` (several client
+          IDs separated by commas).
+
+        Setting both audience variants is a configuration error. `options` are
+        passed on to the constructor."""
         env = os.environ if environ is None else environ
+
+        def split(name: str) -> list[str]:
+            return [a.strip() for a in env.get(name, "").split(",") if a.strip()]
+
         tenant_id = env.get("ENTRA_TENANT_ID", "").strip()
-        audience = [a.strip() for a in env.get("ENTRA_AUDIENCE", "").split(",") if a.strip()]
+        api_client_id = env.get("ENTRA_API_CLIENT_ID", "").strip()
+        audience = split("ENTRA_AUDIENCE")
+        if api_client_id and audience:
+            raise RuntimeError(
+                "Set either ENTRA_API_CLIENT_ID (access token) or ENTRA_AUDIENCE (ID token), "
+                "not both."
+            )
+        if tenant_id and api_client_id:
+            return cls.for_api(
+                tenant_id=tenant_id,
+                api_client_id=api_client_id,
+                allowed_audiences=split("ENTRA_ALLOWED_AUDIENCES"),
+                **options,
+            )
         if not tenant_id or not audience:
             raise RuntimeError(
-                "Entra sign-in is not configured: ENTRA_TENANT_ID and ENTRA_AUDIENCE "
-                "must be set (see README)."
+                "Entra sign-in is not configured: ENTRA_TENANT_ID and ENTRA_API_CLIENT_ID "
+                "(or ENTRA_AUDIENCE for ID tokens) must be set (see README)."
             )
         return cls(tenant_id=tenant_id, audience=audience, **options)
 
@@ -358,15 +446,23 @@ class EntraTokenVerifier:
                 key.key,
                 algorithms=["RS256"],
                 audience=self._audiences,
-                issuer=self._issuer,
+                issuer=self._issuers,
                 leeway=self._leeway,
                 options={"require": ["exp", "iss", "aud"]},
             )
         except jwt.PyJWTError as error:
             raise EntraTokenError(_reason(error)) from error
-        # `scp` is in access tokens for an API, never in an ID token.
-        if "scp" in claims:
-            raise EntraTokenError("access_token")
+        if self._required_scope is None:
+            # `scp` is in access tokens for an API, never in an ID token.
+            if "scp" in claims:
+                raise EntraTokenError("access_token")
+        else:
+            scopes = claims.get("scp")
+            # No `scp` (an ID token, or an app-only token) is not for this API.
+            if not isinstance(scopes, str) or not scopes.strip():
+                raise EntraTokenError("no_scope_claim")
+            if self._required_scope not in scopes.split():
+                raise EntraScopeError
         return self._user(claims)
 
     def _user(self, claims: Mapping[str, Any]) -> EntraUser:
@@ -376,11 +472,16 @@ class EntraTokenVerifier:
         oid = _text(claims.get("oid"))
         if oid is None:
             raise EntraTokenError("missing_oid")
-        email = _text(claims.get("email")) or _text(claims.get("preferred_username"))
+        upn = _text(claims.get("upn"))
+        email = _text(claims.get("email")) or _text(claims.get("preferred_username")) or upn
         if email is None:
             raise EntraTokenError("missing_email")
         return EntraUser(
-            oid=oid, email=email, tenant_id=self._tenant_id, name=_text(claims.get("name"))
+            oid=oid,
+            email=email,
+            tenant_id=self._tenant_id,
+            name=_text(claims.get("name")),
+            upn=upn,
         )
 
 
@@ -476,6 +577,8 @@ class SignedSessionCookie:
         }
         if user.name:
             claims["name"] = user.name
+        if user.upn:
+            claims["upn"] = user.upn
         response.set_cookie(
             key=self.name,
             value=jwt.encode(claims, self._secret, algorithm="HS256"),
@@ -508,7 +611,13 @@ class SignedSessionCookie:
         )
         if not (oid and email and tid):
             return None
-        return EntraUser(oid=oid, email=email, tenant_id=tid, name=_text(claims.get("name")))
+        return EntraUser(
+            oid=oid,
+            email=email,
+            tenant_id=tid,
+            name=_text(claims.get("name")),
+            upn=_text(claims.get("upn")),
+        )
 
     def clear(self, response: Response) -> None:
         """Deletes the cookie, for a sign-out route."""
@@ -593,6 +702,9 @@ def create_entra_auth_dependency(
                     detail="Sign-in is temporarily unavailable",
                     headers={"Retry-After": "30"},
                 ) from error
+            except EntraScopeError as error:
+                logger.debug("Token rejected: %s", error.reason)
+                raise HTTPException(status_code=403, detail="Missing scope") from error
             except EntraTokenError as error:
                 logger.debug("Token rejected: %s", error.reason)
                 raise HTTPException(

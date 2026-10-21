@@ -323,7 +323,7 @@ def test_from_env() -> None:
     [{}, {"ENTRA_TENANT_ID": TENANT}, {"ENTRA_AUDIENCE": CLIENT}, {"ENTRA_AUDIENCE": ","}],
 )
 def test_from_env_requires_both_values(environ: dict[str, str]) -> None:
-    with pytest.raises(RuntimeError, match="ENTRA_TENANT_ID and ENTRA_AUDIENCE"):
+    with pytest.raises(RuntimeError, match="ENTRA_TENANT_ID and ENTRA_API_CLIENT_ID"):
         EntraTokenVerifier.from_env(environ)
 
 
@@ -1210,3 +1210,228 @@ def test_an_oversized_key_document_is_cut_off_and_refused(key_server: str) -> No
 def test_the_key_url_must_be_https() -> None:
     with pytest.raises(ValueError, match="https"):
         _fetcher("http://login.microsoftonline.com/keys")
+
+
+# --- Access token (`access_as_user`) -------------------------------------------
+
+API = "44444444-4444-4444-8444-4444444444ff"
+ISSUER_V1 = f"https://sts.windows.net/{TENANT}/"
+
+
+def make_api_verifier(issuer: Issuer, **options: Any) -> EntraTokenVerifier:
+    return EntraTokenVerifier.for_api(
+        tenant_id=TENANT, api_client_id=API, fetch_jwks=issuer.fetch, **options
+    )
+
+
+def access_token(issuer: Issuer, **claims: Any) -> str:
+    base: dict[str, Any] = {
+        "aud": f"api://{API}",
+        "scp": "access_as_user",
+        "email": None,
+        "preferred_username": "anna@example.com",
+    }
+    return issuer.mint(**(base | claims))
+
+
+async def test_a_valid_access_token(issuer: Issuer) -> None:
+    user = await make_api_verifier(issuer).verify(access_token(issuer))
+
+    assert user == EntraUser(
+        oid=OID, email="anna@example.com", tenant_id=TENANT, name="Anna Muster"
+    )
+
+
+@pytest.mark.parametrize("aud", [API, f"api://{API}"])
+async def test_both_audience_forms_are_accepted(issuer: Issuer, aud: str) -> None:
+    assert (await make_api_verifier(issuer).verify(access_token(issuer, aud=aud))).oid == OID
+
+
+async def test_the_v1_issuer_and_the_upn_are_accepted(issuer: Issuer) -> None:
+    token = access_token(
+        issuer, iss=ISSUER_V1, aud=API, preferred_username=None, upn="anna@example.com"
+    )
+
+    user = await make_api_verifier(issuer).verify(token)
+
+    assert (user.email, user.upn) == ("anna@example.com", "anna@example.com")
+
+
+async def test_extra_audiences_are_allowed(issuer: Issuer) -> None:
+    verifier = make_api_verifier(issuer, allowed_audiences=["api://legacy-name"])
+
+    assert (await verifier.verify(access_token(issuer, aud="api://legacy-name"))).oid == OID
+
+
+@pytest.mark.parametrize(
+    ("claims", "expected"),
+    [
+        ({"exp": int(time.time()) - 600}, "expired"),
+        ({"nbf": int(time.time()) + 600}, "not_yet_valid"),
+        ({"aud": "api://someone-else"}, "audience"),
+        ({"aud": CLIENT}, "audience"),
+        ({"iss": "https://login.microsoftonline.com/other/v2.0"}, "issuer"),
+        ({"iss": "https://sts.windows.net/other/"}, "issuer"),
+        ({"tid": "99999999-9999-4999-8999-9999999999ee"}, "tenant"),
+        ({"scp": None}, "no_scope_claim"),
+        ({"scp": ""}, "no_scope_claim"),
+        ({"scp": "access_as_user_not", "aud": API}, "scope"),
+        ({"scp": "User.Read openid"}, "scope"),
+    ],
+)
+async def test_access_token_is_rejected(
+    issuer: Issuer, claims: dict[str, Any], expected: str
+) -> None:
+    assert await reason(make_api_verifier(issuer), access_token(issuer, **claims)) == expected
+
+
+async def test_the_scope_may_be_one_of_several(issuer: Issuer) -> None:
+    token = access_token(issuer, scp="User.Read access_as_user")
+
+    assert (await make_api_verifier(issuer).verify(token)).oid == OID
+
+
+async def test_an_id_token_is_refused_in_access_token_mode(issuer: Issuer) -> None:
+    assert await reason(make_api_verifier(issuer), issuer.mint(aud=API)) == "no_scope_claim"
+
+
+async def test_an_access_token_is_refused_in_id_token_mode(issuer: Issuer) -> None:
+    assert await reason(make_verifier(issuer), access_token(issuer, aud=CLIENT)) == "access_token"
+
+
+async def test_the_v1_issuer_is_refused_in_id_token_mode(issuer: Issuer) -> None:
+    assert await reason(make_verifier(issuer), issuer.mint(iss=ISSUER_V1)) == "issuer"
+
+
+async def test_access_token_with_a_wrong_signature(issuer: Issuer) -> None:
+    other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    token = access_token(issuer, key=other)
+
+    assert await reason(make_api_verifier(issuer), token) == "signature"
+
+
+async def test_access_token_key_rotation_is_noticed_through_the_kid(issuer: Issuer) -> None:
+    clock = Clock()
+    verifier = make_api_verifier(issuer, clock=clock)
+    await verifier.verify(access_token(issuer))
+
+    new_key = issuer.add_key("kid-2")
+    clock.now += 61  # past the minimum refresh time
+    user = await verifier.verify(access_token(issuer, key=new_key, kid="kid-2"))
+
+    assert user.oid == OID
+    assert issuer.fetches == 2
+
+
+async def test_an_unknown_kid_is_refused_after_one_reload(issuer: Issuer) -> None:
+    verifier = make_api_verifier(issuer)
+    stranger = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    token = access_token(issuer, key=stranger, kid="kid-unknown")
+
+    assert await reason(verifier, token) == "unknown_kid"
+
+
+def test_for_api_and_from_env_build_the_same_audiences(issuer: Issuer) -> None:
+    verifier = EntraTokenVerifier.from_env(
+        {
+            "ENTRA_TENANT_ID": TENANT,
+            "ENTRA_API_CLIENT_ID": f" {API} ",
+            "ENTRA_ALLOWED_AUDIENCES": f"api://extra, {API}",
+        },
+        fetch_jwks=issuer.fetch,
+    )
+
+    assert verifier._audiences == [API, f"api://{API}", "api://extra"]
+    assert verifier.issuer == ISSUER
+
+
+def test_from_env_refuses_both_modes_at_once() -> None:
+    with pytest.raises(RuntimeError, match="not both"):
+        EntraTokenVerifier.from_env(
+            {"ENTRA_TENANT_ID": TENANT, "ENTRA_API_CLIENT_ID": API, "ENTRA_AUDIENCE": CLIENT}
+        )
+
+
+@pytest.mark.parametrize("scope", ["", "  ", "two scopes"])
+def test_the_scope_must_be_one_name(scope: str) -> None:
+    with pytest.raises(ValueError, match="one scope name"):
+        EntraTokenVerifier(tenant_id=TENANT, audience=API, required_scope=scope)
+
+
+def test_for_api_needs_a_client_id() -> None:
+    with pytest.raises(ValueError, match="api_client_id"):
+        EntraTokenVerifier.for_api(tenant_id=TENANT, api_client_id=" ")
+
+
+def api_app(issuer: Issuer) -> FastAPI:
+    auth = create_entra_auth_dependency(
+        make_api_verifier(issuer), session=SignedSessionCookie(secret=SECRET)
+    )
+    app = FastAPI()
+
+    @app.get("/api/me")
+    async def me(user: Any = Depends(auth)) -> Any:
+        return {"oid": user.oid, "email": user.email, "upn": user.upn}
+
+    return app
+
+
+async def test_the_access_token_is_exchanged_for_a_cookie(issuer: Issuer) -> None:
+    token = access_token(issuer, upn="u@example.com")
+    async with client_for(api_app(issuer)) as client:
+        first = await client.get("/api/me", headers=bearer(token))
+        second = await client.get(
+            "/api/me", headers={"Cookie": f"bms_session={cookie_value(first)}"}
+        )
+
+    expected = {"oid": OID, "email": "anna@example.com", "upn": "u@example.com"}
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json() == expected
+
+
+async def test_a_missing_scope_is_403_and_sets_no_cookie(issuer: Issuer) -> None:
+    token = access_token(issuer, scp="User.Read")
+    async with client_for(api_app(issuer)) as client:
+        response = await client.get("/api/me", headers=bearer(token))
+
+    assert response.status_code == 403
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [{"scp": None}, {"aud": "api://someone-else"}, {"exp": int(time.time()) - 600}],
+)
+async def test_id_token_foreign_audience_and_expired_are_401(
+    issuer: Issuer, claims: dict[str, Any]
+) -> None:
+    async with client_for(api_app(issuer)) as client:
+        response = await client.get("/api/me", headers=bearer(access_token(issuer, **claims)))
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == 'Bearer error="invalid_token"'
+    assert "set-cookie" not in response.headers
+
+
+async def test_the_token_wins_over_the_cookie_of_a_different_user(issuer: Issuer) -> None:
+    stale = Response()
+    SignedSessionCookie(secret=SECRET).issue(
+        stale, EntraUser(oid=OTHER_OID, email="boris@example.com", tenant_id=TENANT)
+    )
+    cookie = {"Cookie": f"bms_session={cookie_value(stale)}"}
+
+    async with client_for(api_app(issuer)) as client:
+        won = await client.get("/api/me", headers={**bearer(access_token(issuer)), **cookie})
+        # A bad token is not rescued by the valid cookie of the other user.
+        no_scope = await client.get(
+            "/api/me", headers={**bearer(access_token(issuer, scp="x")), **cookie}
+        )
+        id_token = await client.get(
+            "/api/me", headers={**bearer(access_token(issuer, scp=None)), **cookie}
+        )
+
+    assert won.json()["oid"] == OID
+    assert no_scope.status_code == 403
+    assert id_token.status_code == 401

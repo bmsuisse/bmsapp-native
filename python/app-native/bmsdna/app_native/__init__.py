@@ -37,6 +37,7 @@ from .documents import (
 )
 from .entra import (
     EntraKeysUnavailableError,
+    EntraScopeError,
     EntraTokenError,
     EntraTokenVerifier,
     EntraUser,
@@ -243,6 +244,7 @@ __all__ = [
     "DocumentMetadata",
     "DocumentReference",
     "EntraKeysUnavailableError",
+    "EntraScopeError",
     "EntraTokenError",
     "EntraTokenVerifier",
     "EntraUser",
