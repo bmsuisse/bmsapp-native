@@ -634,9 +634,21 @@ async def me(user=Depends(require_user)):
 | -------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `ENTRA_TENANT_ID`          | Directory (tenant) ID, a GUID. `common` and similar are refused.                                              |
 | `ENTRA_AUDIENCE`           | Client ID of the iOS app's registration (the `aud` of the token); several separated by commas.                |
+| `ENTRA_API_CLIENT_ID`      | Instead of `ENTRA_AUDIENCE`: client ID of your API, for the `access_as_user` access token (see below).        |
+| `ENTRA_ALLOWED_AUDIENCES`  | Optional, with `ENTRA_API_CLIENT_ID`: extra accepted `aud` values, comma-separated.                           |
 | `SESSION_SECRET`           | Signs the session cookie. Random, at least 32 bytes. Your own variable name, passed to the cookie.            |
 | `EntraTokenVerifier(...)`  | `leeway` (60 s), `jwks_cache_seconds` (1 h), `jwks_min_refresh_seconds` (60 s), `jwks_timeout_seconds` (10 s) |
 | `SignedSessionCookie(...)` | `name` (`bms_session`), `max_age` (8 h), `same_site` (`lax`), `secure` (`True`)                               |
+
+**Access token (`access_as_user`).** Current app versions send an access token for
+`api://<api-client-id>/access_as_user` instead of the ID token. Set
+`ENTRA_API_CLIENT_ID` (or use `EntraTokenVerifier.for_api(...)`) and use the same
+`create_entra_auth_dependency(...)`: `aud` may be `<api-client-id>` or
+`api://<api-client-id>`, `iss` the v1.0 or v2.0 issuer, `scp` must contain
+`access_as_user`. No `scp` (ID token) or another audience is 401, a missing scope
+403, and the token always wins over a session cookie. The Entra setup (expose an
+API, scope, pre-authorized client) is in
+[docs/entra-token-guide.md](../../docs/entra-token-guide.md#access-token-for-your-api-access_as_user).
 
 What the dependency answers:
 

@@ -115,6 +115,63 @@ Returning `None` answers **403**. It is called for the token and for the cookie 
 so a user you remove is out at once, even with a cookie that is still valid. Without
 `resolve_user`, `context.user` is the `EntraUser` (`oid`, `email`, `name`, `tenant_id`).
 
+## Access token for your API (`access_as_user`)
+
+Newer app versions sign in once with MSAL and, for web apps with the `identity`
+capability, send an **access token** for your own API instead of the ID token:
+
+```
+Authorization: Bearer <access token, scope api://<api-client-id>/access_as_user>
+```
+
+The app never sends the session cookie in this case (passkey sign-in does not work
+in the web view). The token is the only proof of identity; the cookie exchange
+below is optional for the browser-only requests.
+
+**Entra setup** (app registration of your backend, placeholders only):
+
+1. **Expose an API**: set the application ID URI to `api://<api-client-id>`.
+2. Add a scope `access_as_user` (who can consent: admins and users).
+3. **Authorized client applications**: add `<ios-client-id>`, the client ID of the iOS
+   app's registration, and tick `access_as_user`. The user then never sees a
+   consent prompt.
+4. In the manifest, `accessTokenAcceptedVersion` may be `1` or `2`; the toolkit accepts
+   both issuers (see below).
+
+**Backend:**
+
+```python
+verifier = EntraTokenVerifier.from_env()
+# ENTRA_TENANT_ID=<tenant-id>
+# ENTRA_API_CLIENT_ID=<api-client-id>
+# ENTRA_ALLOWED_AUDIENCES=<optional, comma-separated extra audiences>
+
+require_user = create_entra_auth_dependency(
+    verifier, session=SignedSessionCookie(secret=os.environ["SESSION_SECRET"])
+)
+```
+
+Or in code: `EntraTokenVerifier.for_api(tenant_id=..., api_client_id=...)`. Setting
+`ENTRA_API_CLIENT_ID` selects this mode; `ENTRA_AUDIENCE` keeps selecting the ID
+token mode. Setting both is an error. The rest (`require_user`, `resolve_user`,
+cookie, `context.user`) works as described above.
+
+| Check       | Value                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| Signature   | RS256, tenant keys (cached, reloaded when the `kid` is unknown, at most once a minute)         |
+| `iss`       | `https://login.microsoftonline.com/<tenant-id>/v2.0` or `https://sts.windows.net/<tenant-id>/` |
+| `tid`       | `<tenant-id>`                                                                                  |
+| `aud`       | `<api-client-id>`, `api://<api-client-id>` or one of `ENTRA_ALLOWED_AUDIENCES`                 |
+| `exp`/`nbf` | with a small tolerance (60 s)                                                                  |
+| `scp`       | space-separated, must contain `access_as_user`                                                 |
+
+An ID token (no `scp`) or a token for another audience is **401**. A genuine token
+without the scope is **403**. If a token and a session cookie arrive together, the
+token wins: an invalid token is 401 and is never rescued by the cookie, and a valid
+token replaces the cookie of another user. `EntraUser` gains `upn` (the `upn` claim,
+if present); `email` is `email`, else `preferred_username`, else `upn`. Logs carry the
+failure reason only, never a token or its claims.
+
 ## What the backend answers
 
 | Request                                          | Answer                                                                              |
@@ -124,6 +181,7 @@ so a user you remove is out at once, even with a cookie that is still valid. Wit
 | No token, valid cookie                           | accepted                                                                            |
 | No token, no valid cookie                        | **401**                                                                             |
 | Valid token, but `resolve_user` returns `None`   | **403**                                                                             |
+| Access token without the `access_as_user` scope  | **403** (access token mode)                                                         |
 | Microsoft's signing keys cannot be loaded at all | **503**                                                                             |
 
 Why **401** and not 403 or a redirect: the app treats 401 as "the token was not
