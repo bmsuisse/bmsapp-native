@@ -10,10 +10,11 @@ python/app-native/     bmsdna-app-native      backend side (FastAPI, APNs)
 contract-fixtures/     shared example payloads of both sides
 e2e/                   Playwright: npm package in the browser against the Python models
 docs/                  one guide per topic
-skills/bmsapp-native/  skill for projects that use the packages
 ```
 
 The iOS app lives in a separate repository and is the other side of this standard. The formats here have to match it.
+
+The agent skill for projects that use the packages is **not** in this repo: it is the `bmsapp-native` skill in [bmsuisse/skills](https://github.com/bmsuisse/skills/tree/main/skills/bmsapp-native). When a change here adds, renames or removes a public function, router or capability that the skill names, update the skill there in a separate pull request.
 
 ## 2. The format is maintained by hand on both sides
 
