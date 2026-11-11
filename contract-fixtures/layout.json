@@ -1,0 +1,98 @@
+{
+  "description": "getLayout() and the payload of window.onNativeLayoutChange (feature layout). Both carry the same fields.",
+  "results": {
+    "valid": [
+      {
+        "name": "iPhone, portrait, no keyboard",
+        "value": {
+          "ok": true,
+          "keyboardHeight": 0,
+          "keyboardVisible": false,
+          "sizeClass": "compact",
+          "orientation": "portrait",
+          "width": 390,
+          "height": 664
+        }
+      },
+      {
+        "name": "iPad landscape with the keyboard",
+        "value": {
+          "ok": true,
+          "keyboardHeight": 336,
+          "keyboardVisible": true,
+          "sizeClass": "regular",
+          "orientation": "landscape",
+          "width": 1180,
+          "height": 320
+        }
+      },
+      { "name": "not available", "value": { "ok": false, "error": "unavailable" } }
+    ],
+    "invalid": [
+      {
+        "name": "keyboardHeight missing",
+        "value": {
+          "ok": true,
+          "keyboardVisible": false,
+          "sizeClass": "compact",
+          "orientation": "portrait",
+          "width": 1,
+          "height": 1
+        },
+        "error": "failed"
+      },
+      {
+        "name": "unknown size class",
+        "value": {
+          "ok": true,
+          "keyboardHeight": 0,
+          "keyboardVisible": false,
+          "sizeClass": "medium",
+          "orientation": "portrait",
+          "width": 1,
+          "height": 1
+        },
+        "error": "failed"
+      },
+      {
+        "name": "orientation unknown",
+        "value": {
+          "ok": true,
+          "keyboardHeight": 0,
+          "keyboardVisible": false,
+          "sizeClass": "compact",
+          "orientation": "square",
+          "width": 1,
+          "height": 1
+        },
+        "error": "failed"
+      }
+    ]
+  },
+  "events": {
+    "valid": [
+      {
+        "name": "keyboard shown",
+        "value": {
+          "keyboardHeight": 336,
+          "keyboardVisible": true,
+          "sizeClass": "compact",
+          "orientation": "portrait",
+          "width": 390,
+          "height": 328
+        }
+      },
+      {
+        "name": "Split View resized",
+        "value": {
+          "keyboardHeight": 0,
+          "keyboardVisible": false,
+          "sizeClass": "compact",
+          "orientation": "landscape",
+          "width": 507,
+          "height": 744
+        }
+      }
+    ]
+  }
+}

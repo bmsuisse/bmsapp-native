@@ -317,6 +317,50 @@ If your API is on **another origin** than the page, the `Authorization` header m
 the browser send a preflight request: your backend needs CORS that allows this header
 and the origin of the page.
 
+## A token for another API (`resource`)
+
+The token above is for **your web app's backend**. If the page must call a
+**different API** of your tenant with the user's identity (a Graph-like service, another
+team's backend), ask for a token for that API:
+
+```ts
+import { getAccessToken } from '@bmsuisse/app-native'
+
+const res = await getAccessToken({ resource: 'api://<other-api-client-id>/.default' })
+if (res.ok) {
+  await fetch('https://other-api.example.com/offers', {
+    headers: { Authorization: `Bearer ${res.token}` },
+  })
+} else if (res.error === 'consentRequired') {
+  // the user has not consented to this API yet:
+  await getAccessToken({ resource, interactive: true }) // lets the app show the consent screen
+}
+```
+
+| Option        | Meaning                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------- |
+| `resource`    | An Entra scope such as `api://<app-id>/.default`. Without it everything above is unchanged  |
+| `interactive` | With `resource`: the app may show the consent screen instead of answering `consentRequired` |
+| `refresh`     | As before: force a new token                                                                |
+
+- The answer is `{ ok: true, token, expiresAt, resource }`, acquired **silently**.
+  `expiresAt` is in seconds since 1970, as before. Cache tokens **per resource**.
+- Only resources that are **configured for this web app in the app** are allowed;
+  every other resource answers `forbidden`. The page cannot ask for arbitrary scopes.
+- `consentRequired` means the user still has to consent to that API. Without
+  `interactive` the app does not interrupt the user; with `interactive: true` it shows
+  the consent screen.
+- The other errors are those of `getAccessToken`: `capability` (no `identity`),
+  `forbidden`, `notSignedIn`, and `invalid` for a bad option (the package answers that
+  itself, without asking the app).
+- The token's `aud` is the other API. Send it to that API **only**; your own backend
+  will (rightly) not accept it. The other API verifies it like any Entra token, in a
+  backend built with this toolkit with `EntraTokenVerifier(audience=<its client ID>)`.
+- It needs the feature **`tokenResources`** (`hasFeature('tokenResources')`). An older
+  app would ignore `resource` and hand out the normal token, which is the wrong
+  audience, so the package does not ask it: `getAccessToken({ resource })` answers
+  `unavailable` there and in the browser. Without `resource` nothing changed.
+
 ## Good to know
 
 - **Home Screen widgets** run in a separate process and cannot renew the token. They
@@ -340,7 +384,8 @@ and the origin of the page.
   identify the user, **never forward it, store it or write it to a log**. If every
   backend should get a token of its own, the app can ask for one scope per web app
   later (`aud` becomes `api://…`); `EntraTokenVerifier(audience=[…])` already takes
-  several audiences.
+  several audiences. For a call to a different API the page can already ask for a token
+  with that API as `aud`, see "A token for another API" above.
 - **Local development:** without the app there is no token. Keep a development switch of
   your own (for example a header with an email address that only works in development
   mode); nothing in this guide changes it.

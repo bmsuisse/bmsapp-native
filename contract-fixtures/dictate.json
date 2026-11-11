@@ -1,0 +1,48 @@
+{
+  "description": "dictate(options?): the options the page passes, and what the app answers (feature dictate, capability microphone).",
+  "options": {
+    "valid": [
+      { "name": "none", "value": {} },
+      {
+        "name": "Swiss German, 30 seconds, with terms",
+        "value": {
+          "locale": "de-CH",
+          "maxSeconds": 30,
+          "contextualStrings": ["Palette", "Lieferschein"]
+        }
+      },
+      { "name": "shortest", "value": { "maxSeconds": 1 } },
+      { "name": "longest", "value": { "maxSeconds": 120 } },
+      { "name": "50 terms", "value": { "contextualStrings": "@50" } }
+    ],
+    "invalid": [
+      { "name": "maxSeconds 0", "value": { "maxSeconds": 0 }, "error": "invalid" },
+      { "name": "maxSeconds 121", "value": { "maxSeconds": 121 }, "error": "invalid" },
+      { "name": "maxSeconds a string", "value": { "maxSeconds": "30" }, "error": "invalid" },
+      { "name": "51 terms", "value": { "contextualStrings": "@51" }, "error": "invalid" },
+      {
+        "name": "a term that is not a string",
+        "value": { "contextualStrings": [1] },
+        "error": "invalid"
+      },
+      { "name": "locale empty", "value": { "locale": "" }, "error": "invalid" }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "text",
+        "value": { "ok": true, "text": "Bitte zwei Paletten liefern", "locale": "de-CH" }
+      },
+      { "name": "nothing said", "value": { "ok": true, "text": "", "locale": "de-CH" } },
+      { "name": "cancelled", "value": { "ok": false, "error": "cancelled" } },
+      { "name": "microphone turned off", "value": { "ok": false, "error": "denied" } },
+      { "name": "no recognizer for the locale", "value": { "ok": false, "error": "unavailable" } },
+      { "name": "no microphone capability", "value": { "ok": false, "error": "capability" } }
+    ],
+    "invalid": [
+      { "name": "text missing", "value": { "ok": true, "locale": "de-CH" }, "error": "failed" },
+      { "name": "locale missing", "value": { "ok": true, "text": "x" }, "error": "failed" }
+    ]
+  }
+}

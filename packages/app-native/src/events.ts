@@ -3,6 +3,7 @@
 // to any number of listeners. A custom function that was already set before
 // keeps being called.
 
+import type { LayoutInfo } from './layout.js'
 import type { NativeSurfaceActionEvent } from './surfaces.js'
 
 export type NativeEventMap = {
@@ -24,6 +25,12 @@ export type NativeEventMap = {
    * `onAction` options of `showForm` / `showContent` do it.
    */
   surfaceAction: NativeSurfaceActionEvent
+  /**
+   * The layout of the web view changed: the keyboard appeared or went away (final
+   * values), the device turned, or the window was resized (Split View, Stage
+   * Manager). Feature `layout`; see `getLayout`.
+   */
+  layoutChange: LayoutInfo
 }
 
 export type NativeEvent = keyof NativeEventMap
@@ -36,6 +43,7 @@ const GLOBALS: Record<NativeEvent, string> = {
   barcodesScanned: 'onBarcodesScanned',
   textScanned: 'onTextScanned',
   surfaceAction: 'onNativeSurfaceAction',
+  layoutChange: 'onNativeLayoutChange',
 }
 
 type Listener<E extends NativeEvent> = (payload: NativeEventMap[E]) => void

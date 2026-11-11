@@ -1,11 +1,27 @@
-// Scanning text and several barcodes with the camera: `scanText`, multi-code
-// `scanBarcodes` and `scanBarcode` with options. `scanBarcode()` without options
-// behaves as before (callback only).
+// Scanning with the camera: documents (`scanDocument`), text (`scanText`) and
+// several barcodes (`scanBarcodes`, `scanBarcode` with options). `scanBarcode()`
+// without options behaves as before (callback only).
 // Details: docs/scan-guide.md
 
-import { call, can, send, type NativeResult } from './bridge.js'
+import { call, can, hasFeature, send, type NativeResult } from './bridge.js'
 import { isDevelopment, warn } from './dev.js'
+import {
+  toDocumentsResult,
+  type DocumentMode,
+  type DocumentsResult,
+  type NativeDocument,
+} from './documents.js'
 import { on } from './events.js'
+import {
+  asFailure as failureOf,
+  booleanProblem,
+  contextProblem,
+  invalid,
+  isRecord,
+  kindProblem,
+  modeProblem,
+  unavailable,
+} from './internal.js'
 
 /** The barcode kinds the scanner knows (Apple's names, lowercase first letter). */
 export const BARCODE_FORMATS = [
@@ -266,4 +282,95 @@ export function scanBarcodes(options: ScanBarcodesOptions = {}): Promise<ScanBar
   if (options.formats?.length) payload.formats = [...options.formats]
   if (options.max !== undefined) payload.max = options.max
   return scanCodes(payload, true) as Promise<ScanBarcodesResult>
+}
+
+// --- documents ---------------------------------------------------------------
+
+export type ScanDocumentOptions = {
+  /** Sent along with the upload as `context`; a JSON object, at most 4096 bytes serialized. */
+  context?: Record<string, unknown>
+  /** 1 to 32 characters of `a-z0-9_-`; default `scan`. The backend sees it as `kind`. */
+  kind?: string
+  /**
+   * `upload` (default): the app uploads each document to the web app's
+   * `documentUploadPath`. `return`: the PDF comes back as base64 `data`.
+   */
+  mode?: DocumentMode
+  /**
+   * Default `false`. When `true` the scanner offers "Next document" and "Done"
+   * after each document; every document is a separate PDF and a separate upload.
+   */
+  multiple?: boolean
+}
+
+/**
+ * `documents` has one entry per finished document (`NativeDocument`, one PDF
+ * with all its pages).
+ *
+ * `oldApp: true`: the app predates the result (feature `scanResult`). It scanned
+ * and uploaded, but cannot say what; `documents` is empty then.
+ */
+export type ScanDocumentResult =
+  | { ok: true; documents: NativeDocument[]; oldApp?: true }
+  | Extract<DocumentsResult, { ok: false }>
+
+function scanDocumentProblem(options: unknown): string | undefined {
+  if (!isRecord(options)) return 'options have to be an object.'
+  return (
+    contextProblem(options.context) ??
+    kindProblem(options.kind) ??
+    modeProblem(options.mode) ??
+    booleanProblem('multiple', options.multiple)
+  )
+}
+
+/** Does this ask for more than what an app without `scanOptions` does? */
+function needsScanOptions(options: ScanDocumentOptions): boolean {
+  return (
+    options.context != null ||
+    (options.kind !== undefined && options.kind !== 'scan') ||
+    options.mode === 'return' ||
+    options.multiple === true
+  )
+}
+
+/**
+ * Opens the native document scanner. Requires `camera`.
+ *
+ * Without options: the app uploads the PDF to the web app's `documentUploadPath`
+ * (backend: `create_document_router` in `bmsdna-app-native`) with `kind: "scan"`,
+ * as it always did, and the result now contains `documents`.
+ *
+ * With options (feature `scanOptions`): `mode: 'return'` brings the PDF back to
+ * the page, `multiple` scans several documents in a row, `kind` and `context`
+ * travel with the upload. An app without the feature would ignore them and run
+ * the plain scan, so options that change the behavior answer `unavailable`
+ * without scanning.
+ *
+ * Cancelled before the first document is finished: `cancelled`; afterwards you
+ * get the finished ones. A document that failed has `error` (`failed`,
+ * `tooLarge`). An app that predates the result (feature `scanResult`) answers
+ * `{ ok: true, documents: [], oldApp: true }`. Invalid options answer `invalid`
+ * without asking the app. Never throws.
+ */
+export async function scanDocument(options?: ScanDocumentOptions): Promise<ScanDocumentResult> {
+  if (options !== undefined) {
+    const problem = scanDocumentProblem(options)
+    if (problem) return invalid('scanDocument', problem)
+    if (needsScanOptions(options) && !hasFeature('scanOptions')) return unavailable()
+  }
+  const payload: Record<string, unknown> = {}
+  if (options?.context != null) payload.context = options.context
+  if (options?.kind !== undefined) payload.kind = options.kind
+  if (options?.mode !== undefined) payload.mode = options.mode
+  if (options?.multiple !== undefined) payload.multiple = options.multiple
+
+  const answer = await send('scanDocument', payload)
+  if (!answer.ok) {
+    return answer.error === 'unknownAction' ? unavailable() : failureOf(answer)
+  }
+  if (!hasFeature('scanResult') && !Array.isArray((answer as { documents?: unknown }).documents)) {
+    return { ok: true, documents: [], oldApp: true }
+  }
+  return toDocumentsResult(answer) as ScanDocumentResult
 }

@@ -1,0 +1,77 @@
+{
+  "description": "Files shared into the web app (feature receiveDocuments): the payload of window.onNativeDocumentsReceived and the answer of consumeReceivedDocuments.",
+  "events": {
+    "valid": [
+      {
+        "name": "a PDF and an e-mail shared from Mail",
+        "value": {
+          "documents": [
+            {
+              "name": "Offer 4711.pdf",
+              "mime": "application/pdf",
+              "size": 220331,
+              "uploadId": "5a8d2c4f-9b17-4e63-a2d0-8f3b6c1e7d94",
+              "upload": { "status": 200, "body": { "ok": true, "id": "doc-10" } }
+            },
+            {
+              "name": "Re_ Offer 4711.eml",
+              "mime": "message/rfc822",
+              "size": 18422,
+              "uploadId": "d3e7a9b2-6c41-4f58-8b0a-2e9d5f1c7a36",
+              "upload": { "status": 200, "body": { "ok": true, "id": "doc-11" } }
+            }
+          ]
+        }
+      },
+      {
+        "name": "an upload that failed",
+        "value": {
+          "documents": [
+            {
+              "name": "mail.msg",
+              "uploadId": "f9b3d6a1-2e75-4c80-9a4b-7d1e5c8f3b02",
+              "error": "failed"
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      { "name": "documents missing", "value": {}, "error": "ignored" },
+      { "name": "documents not a list", "value": { "documents": {} }, "error": "ignored" },
+      {
+        "name": "a document without uploadId",
+        "value": { "documents": [{ "name": "a.pdf" }] },
+        "error": "ignored"
+      }
+    ]
+  },
+  "consume": {
+    "valid": [
+      { "name": "nothing queued", "value": { "ok": true, "documents": [] } },
+      {
+        "name": "one queued document",
+        "value": {
+          "ok": true,
+          "documents": [
+            {
+              "name": "Offer 4711.pdf",
+              "mime": "application/pdf",
+              "size": 220331,
+              "uploadId": "5a8d2c4f-9b17-4e63-a2d0-8f3b6c1e7d94",
+              "upload": { "status": 200, "body": { "ok": true, "id": "doc-10" } }
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      { "name": "documents missing", "value": { "ok": true }, "error": "failed" },
+      {
+        "name": "a document of the wrong type",
+        "value": { "ok": true, "documents": [1] },
+        "error": "failed"
+      }
+    ]
+  }
+}

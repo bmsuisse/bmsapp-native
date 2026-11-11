@@ -1,0 +1,123 @@
+{
+  "description": "pickFiles(options): the options the page passes, and what the app answers (feature pickFiles).",
+  "options": {
+    "valid": [
+      { "name": "files only", "value": { "sources": ["files"] } },
+      {
+        "name": "supplier offers from everywhere",
+        "value": {
+          "sources": ["files", "photos", "camera"],
+          "accept": ["application/pdf", "image/jpeg", ".eml", ".msg"],
+          "multiple": true,
+          "mode": "return",
+          "kind": "pick"
+        }
+      },
+      {
+        "name": "uploaded with a context",
+        "value": {
+          "sources": ["photos"],
+          "mode": "upload",
+          "kind": "offer-photo",
+          "context": { "offerId": "O-2026-0042" }
+        }
+      }
+    ],
+    "invalid": [
+      { "name": "no sources", "value": { "sources": [] }, "error": "invalid" },
+      { "name": "sources missing", "value": {}, "error": "invalid" },
+      { "name": "unknown source", "value": { "sources": ["cloud"] }, "error": "invalid" },
+      {
+        "name": "accept not a list",
+        "value": { "sources": ["files"], "accept": ".pdf" },
+        "error": "invalid"
+      },
+      {
+        "name": "multiple not a boolean",
+        "value": { "sources": ["files"], "multiple": 1 },
+        "error": "invalid"
+      },
+      {
+        "name": "mode unknown",
+        "value": { "sources": ["files"], "mode": "keep" },
+        "error": "invalid"
+      },
+      {
+        "name": "kind with a capital",
+        "value": { "sources": ["files"], "kind": "Pick" },
+        "error": "invalid"
+      },
+      {
+        "name": "context over 4096 bytes",
+        "value": { "sources": ["files"], "context": { "text": "@4097" } },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "one PDF returned as base64",
+        "value": {
+          "ok": true,
+          "documents": [
+            {
+              "name": "offer.pdf",
+              "mime": "application/pdf",
+              "size": 11,
+              "uploadId": "a4c1e8d2-7b35-4f90-8c6a-3e5d9b1f2a77",
+              "data": "aGVsbG8gd29ybGQ="
+            }
+          ]
+        }
+      },
+      {
+        "name": "an e-mail and a photo, uploaded",
+        "value": {
+          "ok": true,
+          "documents": [
+            {
+              "name": "offer.eml",
+              "mime": "message/rfc822",
+              "size": 2048,
+              "uploadId": "c7e2a5b9-1d64-4a3f-9b08-6f4c2d8e1a30",
+              "upload": { "status": 200, "body": { "ok": true, "id": "doc-2" } }
+            },
+            {
+              "name": "IMG_0042.jpg",
+              "mime": "image/jpeg",
+              "size": 1834201,
+              "uploadId": "e1b4d7f3-5a92-4c06-8d3e-9a7f1b5c4e68",
+              "upload": { "status": 200, "body": { "ok": true, "id": "doc-3" } }
+            }
+          ]
+        }
+      },
+      {
+        "name": "one file too large",
+        "value": {
+          "ok": true,
+          "documents": [
+            {
+              "name": "catalog.pdf",
+              "mime": "application/pdf",
+              "size": 30000000,
+              "uploadId": "b2f6c9a1-4e87-4d35-a0b9-1c8e3f7d5a42",
+              "error": "tooLarge"
+            }
+          ]
+        }
+      },
+      { "name": "the user closed the picker", "value": { "ok": false, "error": "cancelled" } },
+      { "name": "camera without the capability", "value": { "ok": false, "error": "capability" } }
+    ],
+    "invalid": [
+      { "name": "no documents", "value": { "ok": true, "documents": [] }, "error": "failed" },
+      {
+        "name": "a document without a name",
+        "value": { "ok": true, "documents": [{ "uploadId": "u" }] },
+        "error": "failed"
+      }
+    ]
+  }
+}

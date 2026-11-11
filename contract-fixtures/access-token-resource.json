@@ -1,0 +1,69 @@
+{
+  "description": "getAccessToken({ resource, interactive }) (feature tokenResources, capability identity). The tokens are placeholders.",
+  "options": {
+    "valid": [
+      {
+        "name": "a resource",
+        "value": { "resource": "api://00000000-0000-4000-8000-000000000000/.default" }
+      },
+      {
+        "name": "with the consent screen allowed",
+        "value": {
+          "resource": "api://00000000-0000-4000-8000-000000000000/.default",
+          "interactive": true
+        }
+      },
+      {
+        "name": "forced refresh",
+        "value": {
+          "refresh": true,
+          "resource": "api://00000000-0000-4000-8000-000000000000/.default"
+        }
+      }
+    ],
+    "invalid": [
+      { "name": "resource empty", "value": { "resource": "" }, "error": "invalid" },
+      { "name": "resource not a string", "value": { "resource": 5 }, "error": "invalid" },
+      {
+        "name": "interactive not a boolean",
+        "value": {
+          "resource": "api://00000000-0000-4000-8000-000000000000/.default",
+          "interactive": "yes"
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "a token for the resource",
+        "value": {
+          "ok": true,
+          "token": "header.payload.signature",
+          "expiresAt": 1790000000,
+          "resource": "api://00000000-0000-4000-8000-000000000000/.default"
+        }
+      },
+      { "name": "the user has to consent", "value": { "ok": false, "error": "consentRequired" } },
+      {
+        "name": "resource not configured for this web app",
+        "value": { "ok": false, "error": "forbidden" }
+      },
+      { "name": "no identity capability", "value": { "ok": false, "error": "capability" } },
+      { "name": "not signed in", "value": { "ok": false, "error": "notSignedIn" } }
+    ],
+    "invalid": [
+      {
+        "name": "token missing",
+        "value": { "ok": true, "expiresAt": 1790000000, "resource": "api://x/.default" },
+        "error": "failed"
+      },
+      {
+        "name": "expiresAt a string",
+        "value": { "ok": true, "token": "t", "expiresAt": "soon", "resource": "api://x/.default" },
+        "error": "failed"
+      }
+    ]
+  }
+}

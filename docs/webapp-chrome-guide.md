@@ -503,6 +503,144 @@ window.onNativeBottomBarTap = (id) => {
 document.addEventListener('DOMContentLoaded', applyChrome)
 ```
 
+## Layout: bars, keyboard, size class, iPad
+
+The web view sits **between** the native top bar and the native bottom bar. The bars
+never overlay your content, so a `position: fixed; top: 0` header starts below the top
+bar and a bottom input bar sits above the bottom bar.
+
+**Safe areas.** With `<meta name="viewport" content="..., viewport-fit=cover">`
+`env(safe-area-inset-*)` works, and it reports only what is **left** of the device
+insets: the side insets in landscape, and the home indicator only when no native bottom
+bar is shown. Do not add the insets of the native bars yourself.
+
+```css
+.composer {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+```
+
+**Keyboard.** WebKit's default resizing of `visualViewport` for the on-screen keyboard
+stays on. The app also keeps these on `<html>` up to date:
+
+| What                                 | Values                                                                     |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| CSS property `--bms-keyboard-height` | the height of the keyboard that overlaps the web view, e.g. `0px`, `336px` |
+| Attribute `data-bms-size-class`      | `"compact"` or `"regular"`: the horizontal size class                      |
+| Attribute `data-bms-orientation`     | `"portrait"` or `"landscape"`                                              |
+
+```css
+.chat-input {
+  margin-bottom: var(--bms-keyboard-height, 0px); /* keep the input above the keyboard */
+}
+html[data-bms-size-class='regular'] .detail {
+  display: block; /* master/detail side by side on iPad */
+}
+```
+
+**From script.** The event fires after the keyboard has been shown or hidden (the final
+values), after a rotation and after multitasking resizes. `width` and `height` are the
+size of the web view in CSS px.
+
+```ts
+import { getLayout, keyboardHeight, on } from '@bmsuisse/app-native'
+
+const off = on(
+  'layoutChange',
+  ({ keyboardHeight, keyboardVisible, sizeClass, orientation, width, height }) => {
+    chat.scrollToBottom()
+  }
+)
+
+const layout = await getLayout() // { ok: true, keyboardHeight, keyboardVisible, sizeClass, orientation, width, height }
+const px = await keyboardHeight() // getLayout in the app, visualViewport in the browser
+```
+
+- `getLayout()` and `window.onNativeLayoutChange` need the feature `layout`
+  (`hasFeature('layout')`). In the browser and in an older app `getLayout()` answers
+  `unavailable`, and no attribute or property is set: use media queries and
+  `visualViewport` there. `keyboardHeight()` does that fallback for you (it never
+  throws and returns `0` if it cannot tell).
+- Prefer the CSS property and the attributes for styling and `on('layoutChange')` for
+  logic.
+
+### iPad and hardware keyboard
+
+Web apps support all iPad orientations, **Split View, Slide Over and Stage Manager**:
+the web view resizes, `layoutChange` fires, and `sizeClass` switches between `compact`
+(narrow window) and `regular` (wide window). Build for the window size, not the device.
+
+With a hardware keyboard or trackpad (nothing to call, it is how the app behaves):
+
+- While a web app is shown, the app consumes **no** key events except **Cmd+W** (closes
+  the web app) and system shortcuts. Cmd+K, Cmd+F, Cmd+Z, Option combinations, Esc and
+  the arrow keys reach your page as normal DOM `keydown` events.
+- Pointer hover and the secondary click (the `contextmenu` event) reach the page.
+- Files dragged onto the web view from other apps arrive as a normal HTML `drop` event
+  with `DataTransfer.files`. (Shared files go through the Share Extension instead, see
+  [documents-guide.md](documents-guide.md).)
+
+```ts
+addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault()
+    openCommandPalette()
+  }
+})
+addEventListener('dragover', (e) => e.preventDefault())
+addEventListener('drop', (e) => {
+  e.preventDefault()
+  importFiles([...(e.dataTransfer?.files ?? [])])
+})
+```
+
+## Intercepting the back button
+
+By default the native back button closes the web app and the left-edge swipe goes back
+in the web view's history. A page that has its own back steps (a dialog, a wizard, a
+tab inside an editor) can take over, so the user does not lose their work:
+
+```ts
+import { onBackRequested } from '@bmsuisse/app-native'
+
+const off = onBackRequested(async (source) => {
+  // source: 'button' | 'swipe'
+  if (dialogOpen) {
+    closeDialog()
+    return true
+  } // handled: the app does nothing more
+  if (dirty) {
+    await confirmDiscard()
+    return true
+  }
+  return false // not handled: the default (button closes the web app, swipe goes back)
+})
+// off() when the screen goes away
+```
+
+How it works (feature `backInterception`):
+
+- Registering the first handler calls `setBackInterception({ enabled: true })`;
+  removing the last one calls it with `enabled: false`. The setting lasts until it is
+  called again or the page **fully reloads**. Route changes of a single-page app do
+  **not** reset it: remove the handler when its screen goes away.
+- While enabled, the back button and the swipe do nothing themselves. The app calls
+  `window.onNativeBackRequested({ source })` and waits **800 ms** for
+  `BMSNative.call('backResult', { handled })`. The package does that for you: it answers
+  from the handler, and a handler that has not settled after about **700 ms** counts as
+  `false` (so do not wait for the network in it).
+- `handled: true`: the app does nothing more. `false`, an error, or no answer in time:
+  the default.
+- **A long press on the back button always closes the web app**, whatever the page says.
+- With several handlers (a dialog on top of a page) the newest is asked first; the first
+  to return `true` wins.
+- In the browser and in an app without the feature `onBackRequested` does nothing and
+  returns a no-op cleanup.
+
+Without the package: `BMSNative.call('setBackInterception', { enabled: true })`, define
+`window.onNativeBackRequested = ({ source }) => …` and answer with
+`BMSNative.call('backResult', { handled })` within 800 ms.
+
 ## More bridge actions
 
 ### Is my page running in the app? — `window.BMSNative`
@@ -523,8 +661,16 @@ if (window.BMSNative) {
   BMSNative.version // app version, e.g. "1.0" (also available as appVersion)
   BMSNative.webAppId // your web app ID in the app, e.g. "partner-tool"
   BMSNative.capabilities // e.g. ["camera", "customChrome", ...]
+  BMSNative.features // e.g. ["scanResult", "pickFiles", "layout", ...]; missing in older apps
 }
 ```
+
+`BMSNative.features` lists the contract features the app implements: `scanResult`,
+`scanOptions`, `pickFiles`, `receiveDocuments`, `mediaCapture`, `dictate`, `layout`,
+`backInterception`, `previewFile`, `tokenResources`. What is not listed is not
+supported; an older app has no `features` at all (treat it as an empty list). With the
+package: `hasFeature('pickFiles')`. Every package function that depends on a feature
+answers `unavailable` without asking an app that lacks it.
 
 On the server side, you can recognize the app by the user agent suffix
 `BMSMobile/<version>`.
@@ -553,8 +699,9 @@ message as `postMessage` and returns a promise that resolves with
 `{ ok: true }` or `{ ok: false, error: "..." }`
 (`error`: `"capability"`, `"invalid"`, `"cancelled"`, `"unavailable"`,
 `"failed"`, `"unknownAction"`; `"denied"` for the device actions;
-`"forbidden"` and `"notSignedIn"` for `getAccessToken`; `"forbidden"`, `"busy"`
-and `"tooLarge"` for `showForm`/`showContent`). Actions without a result of
+`"forbidden"`, `"notSignedIn"` and `"consentRequired"` for `getAccessToken`;
+`"forbidden"`, `"busy"` and `"tooLarge"` for `showForm`/`showContent`; `"tooLarge"` for a
+document beyond 25,000,000 bytes). Actions without a result of
 their own respond immediately once the app has accepted them. `showForm` and
 `showContent` resolve once the user is done.
 
@@ -574,7 +721,14 @@ const { ok } = await BMSNative.call('biometricConfirm', { reason: 'Approve order
 | `biometricConfirm`                                                 | `reason?`                                                                                                                  | —                                  | Face ID/Touch ID, falling back to the device passcode. **Only a confirmation on the device, not proof for your backend** — keep securing security-critical approvals on the server side                                                                                               |
 | `setWidgets` / `updateWidget` / `removeWidgets` / `refreshWidgets` | see guide                                                                                                                  | `.dashboardWidgets`                | Widgets on the Home dashboard — see [dashboard-widgets-guide.md](dashboard-widgets-guide.md)                                                                                                                                                                                          |
 | `refreshApprovals`                                                 | —                                                                                                                          | `.approvals`                       | Immediately reloads your pending approvals on Home, e.g. after the page itself has approved something — see [approvals-guide.md](approvals-guide.md)                                                                                                                                  |
-| `getAccessToken`                                                   | `refresh?`                                                                                                                 | `.identity`                        | The Entra ID token of the app's sign-in, for the places where the browser cannot set a header (`WebSocket`, `EventSource`, a web worker, which gets the token from the page). `fetch`/XHR to your own backend get it automatically — see [entra-token-guide.md](entra-token-guide.md) |
+| `getAccessToken`                                                   | `refresh?`, `resource?`, `interactive?`                                                                                    | `.identity`                        | The Entra ID token of the app's sign-in, for the places where the browser cannot set a header (`WebSocket`, `EventSource`, a web worker, which gets the token from the page). `fetch`/XHR to your own backend get it automatically — see [entra-token-guide.md](entra-token-guide.md) |
+| `scanDocument`                                                     | `context?`, `kind?`, `mode?`, `multiple?`                                                                                  | `.camera`                          | Document scanner; each document is a PDF, uploaded or returned — see [scan-guide.md](scan-guide.md)                                                                                                                                                                                   |
+| `pickFiles`                                                        | `sources`, `accept?`, `multiple?`, `mode?`, `context?`, `kind?`                                                            | `.camera` for the camera source    | Picks files, photos or a camera shot; uploaded or returned — see [documents-guide.md](documents-guide.md)                                                                                                                                                                             |
+| `consumeReceivedDocuments`                                         | —                                                                                                                          | —                                  | Documents shared into the web app while the page was not listening; clears the queue — see [documents-guide.md](documents-guide.md)                                                                                                                                                   |
+| `previewFile`                                                      | `url`, `filename?`                                                                                                         | —                                  | Downloads a file of the web app's own origin and opens the native preview — see [documents-guide.md](documents-guide.md)                                                                                                                                                              |
+| `dictate`                                                          | `locale?`, `maxSeconds?`, `contextualStrings?`                                                                             | `.microphone`                      | Native dictation sheet; resolves with the text — see [voice-guide.md](voice-guide.md)                                                                                                                                                                                                 |
+| `getLayout`                                                        | —                                                                                                                          | —                                  | Keyboard height, size class, orientation and size of the web view (see "Layout" above)                                                                                                                                                                                                |
+| `setBackInterception` / `backResult`                               | `enabled` / `handled`                                                                                                      | —                                  | The page takes over the back button and swipe (see "Intercepting the back button" above)                                                                                                                                                                                              |
 | `navigate`                                                         | `destination` (place or text), `waypoints?`, `mode?`, `app?`                                                               | —                                  | Starts a route in Apple Maps, Google Maps or Waze — see [device-actions-guide.md](device-actions-guide.md)                                                                                                                                                                            |
 | `addReminder`                                                      | `title`, `due?`, `allDay?`, `notes?`, `priority?`, `list?`, `url?`, `confirm?`                                             | `.deviceApps`                      | Creates a reminder in Apple Reminders (asks first) — see [device-actions-guide.md](device-actions-guide.md)                                                                                                                                                                           |
 | `saveContact`                                                      | `givenName?`, `familyName?`, `organization?`, `jobTitle?`, `phones?`, `emails?`, `address?`, `url?`, `confirm?`            | `.deviceApps`                      | Saves a contact (system form first) — see [device-actions-guide.md](device-actions-guide.md)                                                                                                                                                                                          |

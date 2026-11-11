@@ -5,14 +5,21 @@ from typing import Any
 import httpx
 import pytest
 from bmsdna.app_native import (
+    DOCUMENT_KINDS,
+    MAX_NATIVE_DOCUMENT_BYTES,
+    InMemoryUploadResults,
+    NativeDocument,
+    NativeDocumentContext,
     NativeFileRef,
     ReceivedDocument,
     WidgetRequestContext,
+    check_document_context,
     create_document_router,
     insecure_no_auth,
     resolve_file_refs,
 )
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import TypeAdapter, ValidationError
 
 
 @pytest.mark.asyncio
@@ -243,3 +250,216 @@ async def test_resolve_file_refs_names_unknown_references_with_422() -> None:
         "refs": ["gone", "other"],
     }
     assert looked_up == ["u-1", "gone", "other"]  # each reference once
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["scan", "pick", "shared", "form", "supplier-offer"])
+async def test_every_kind_of_the_app_reaches_the_callback_with_its_upload_id(kind: str) -> None:
+    received: list[ReceivedDocument] = []
+
+    async def on_document(doc: ReceivedDocument, context: WidgetRequestContext) -> str:
+        received.append(doc)
+        return "doc-1"
+
+    response = await _post(
+        _app(on_document),
+        kind=kind,
+        upload_id="8c2f1a4e-5b0a-4f3e-9d57-2b6f1c9e7a10",
+        context='{"offerId": "O-1"}',
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "id": "doc-1"}
+    meta = received[0].metadata
+    assert (meta.kind, meta.upload_id) == (kind, "8c2f1a4e-5b0a-4f3e-9d57-2b6f1c9e7a10")
+    assert meta.context == {"offerId": "O-1"}
+    assert set(DOCUMENT_KINDS) == {"scan", "pick", "shared", "form"}
+
+
+def _app_with_results(on_document: Any, **options: Any) -> FastAPI:
+    app = FastAPI()
+    app.include_router(
+        create_document_router(
+            on_document_received=on_document,
+            auth_dependency=insecure_no_auth,
+            upload_results=InMemoryUploadResults(**options),
+        ),
+        prefix="/api",
+    )
+    return app
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["scan", "pick", "shared", "form"])
+async def test_upload_results_make_a_retry_idempotent_for_every_kind(kind: str) -> None:
+    calls = 0
+
+    async def on_document(doc: ReceivedDocument, context: WidgetRequestContext) -> str:
+        nonlocal calls
+        calls += 1
+        return f"doc-{calls}"
+
+    app = _app_with_results(on_document)
+    first = await _post(app, kind=kind, upload_id="u-1")
+    retry = await _post(app, kind=kind, upload_id="u-1")
+    other = await _post(app, kind=kind, upload_id="u-2")
+
+    assert first.json() == retry.json() == {"ok": True, "id": "doc-1"}
+    assert other.json() == {"ok": True, "id": "doc-2"}
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_upload_results_do_not_apply_without_an_upload_id_or_across_devices() -> None:
+    calls = 0
+
+    async def on_document(doc: ReceivedDocument, context: WidgetRequestContext) -> str:
+        nonlocal calls
+        calls += 1
+        return f"doc-{calls}"
+
+    app = _app_with_results(on_document)
+    await _post(app, kind="scan")
+    await _post(app, kind="scan")
+    assert calls == 2
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for device in ("a", "b"):
+            await client.post(
+                "/api/documents",
+                data={"device_id": device, "upload_id": "same"},
+                files={"file": ("a.pdf", b"x", "application/pdf")},
+            )
+    assert calls == 4
+
+
+@pytest.mark.asyncio
+async def test_a_failed_attempt_is_not_remembered() -> None:
+    attempts = 0
+
+    async def on_document(doc: ReceivedDocument, context: WidgetRequestContext) -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise HTTPException(status_code=503, detail="try again")
+        return "doc-1"
+
+    app = _app_with_results(on_document)
+    first = await _post(app, kind="pick", upload_id="u-1")
+    retry = await _post(app, kind="pick", upload_id="u-1")
+
+    assert (first.status_code, retry.status_code) == (503, 200)
+    assert retry.json() == {"ok": True, "id": "doc-1"}
+
+
+@pytest.mark.asyncio
+async def test_in_memory_upload_results_expire_and_stay_bounded(monkeypatch: Any) -> None:
+    now = [1000.0]
+    monkeypatch.setattr("bmsdna.app_native.documents.time.monotonic", lambda: now[0])
+    store = InMemoryUploadResults(max_entries=2, ttl_seconds=10)
+    context = WidgetRequestContext(
+        device_id="d", user=None, request=Request({"type": "http", "headers": []})
+    )
+
+    await store.set("a", {"ok": True}, context)
+    await store.set("b", {"ok": True}, context)
+    await store.set("c", {"ok": True}, context)
+    assert await store.get("a", context) is None  # the oldest was dropped
+    assert await store.get("c", context) == {"ok": True}
+    now[0] += 11
+    assert await store.get("c", context) is None  # expired
+
+
+UPLOAD_ID = "8c2f1a4e-5b0a-4f3e-9d57-2b6f1c9e7a10"
+
+
+def test_native_document_needs_mime_and_size_unless_it_failed() -> None:
+    ok = NativeDocument.model_validate(
+        {"name": "a.pdf", "mime": "application/pdf", "size": 3, "uploadId": UPLOAD_ID}
+    )
+    assert ok.upload_id == UPLOAD_ID
+    failed = NativeDocument.model_validate(
+        {"name": "a.pdf", "uploadId": UPLOAD_ID, "error": "failed"}
+    )
+    assert failed.mime is None
+    for bad in (
+        {"name": "a.pdf", "uploadId": UPLOAD_ID},
+        {"name": "a.pdf", "mime": "application/pdf", "uploadId": UPLOAD_ID},
+        {"name": "", "mime": "x", "size": 1, "uploadId": UPLOAD_ID},
+        {"name": "a", "mime": "x", "size": 1, "uploadId": "not-a-uuid"},
+        {"name": "a", "mime": "x", "size": 1, "uploadId": "8c2f1a4e-5b0a-1f3e-9d57-2b6f1c9e7a10"},
+        {"name": "a", "mime": "x", "size": -1, "uploadId": UPLOAD_ID},
+        {"name": "a", "mime": "x", "size": 1, "uploadId": UPLOAD_ID, "pages": 0},
+        {"name": "a", "mime": "x", "size": 1, "uploadId": UPLOAD_ID, "error": "boom"},
+    ):
+        with pytest.raises(ValidationError):
+            NativeDocument.model_validate(bad)
+
+
+def test_native_document_accepts_the_uppercase_uuid_of_ios() -> None:
+    doc = NativeDocument.model_validate(
+        {"name": "a", "mime": "x", "size": 1, "uploadId": UPLOAD_ID.upper()}
+    )
+    assert doc.upload_id == UPLOAD_ID.upper()
+
+
+def test_native_document_size_limit_is_the_contract_limit() -> None:
+    base = {"name": "a.pdf", "mime": "application/pdf", "uploadId": UPLOAD_ID}
+    NativeDocument.model_validate({**base, "size": MAX_NATIVE_DOCUMENT_BYTES})
+    with pytest.raises(ValidationError):
+        NativeDocument.model_validate({**base, "size": MAX_NATIVE_DOCUMENT_BYTES + 1})
+    too_large = NativeDocument.model_validate(
+        {**base, "size": MAX_NATIVE_DOCUMENT_BYTES + 1, "error": "tooLarge"}
+    )
+    assert too_large.error == "tooLarge"
+
+
+def test_native_document_data_is_base64_and_decodes() -> None:
+    base = {"name": "a.txt", "mime": "text/plain", "size": 11, "uploadId": UPLOAD_ID}
+    doc = NativeDocument.model_validate({**base, "data": "aGVsbG8gd29ybGQ="})
+    assert doc.content() == b"hello world"
+    assert NativeDocument.model_validate(base).content() is None
+    with pytest.raises(ValidationError):
+        NativeDocument.model_validate({**base, "data": "not base64!"})
+
+
+def test_native_document_upload_keeps_a_null_body() -> None:
+    doc = NativeDocument.model_validate(
+        {
+            "name": "a.pdf",
+            "mime": "application/pdf",
+            "size": 1,
+            "uploadId": UPLOAD_ID,
+            "upload": {"status": 200, "body": None},
+        }
+    )
+    assert doc.upload is not None and doc.upload.body is None
+    with pytest.raises(ValidationError):
+        NativeDocument.model_validate(
+            {"name": "a", "mime": "x", "size": 1, "uploadId": UPLOAD_ID, "upload": {"status": 200}}
+        )
+
+
+def test_native_document_works_as_a_request_body_type() -> None:
+    adapter = TypeAdapter(list[NativeDocument])
+    docs = adapter.validate_python(
+        [{"name": "a.pdf", "mime": "application/pdf", "size": 1, "uploadId": UPLOAD_ID}]
+    )
+    assert adapter.dump_python(docs, mode="json", by_alias=True, exclude_unset=True) == [
+        {"name": "a.pdf", "mime": "application/pdf", "size": 1, "uploadId": UPLOAD_ID}
+    ]
+
+
+def test_context_is_limited_to_4096_bytes_serialized() -> None:
+    adapter = TypeAdapter(NativeDocumentContext)
+    fits = {"t": "x" * (4096 - 8)}  # {"t":"…"} is 8 bytes around the text
+    assert adapter.validate_python(fits) == fits
+    with pytest.raises(ValidationError, match="4097 bytes"):
+        adapter.validate_python({"t": "x" * (4096 - 7)})
+    # Bytes, not characters: "ä" is two bytes.
+    with pytest.raises(ValidationError):
+        adapter.validate_python({"t": "ä" * 2045})
+    with pytest.raises(ValidationError):
+        adapter.validate_python(["not", "an", "object"])
+    assert check_document_context({}) == {}

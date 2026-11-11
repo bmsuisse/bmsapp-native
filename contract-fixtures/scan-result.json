@@ -1,0 +1,132 @@
+{
+  "description": "scanDocument(options?): the options the page passes, and what the app answers (feature scanResult / scanOptions).",
+  "options": {
+    "valid": [
+      { "name": "none (today's behavior)", "value": {} },
+      {
+        "name": "all defaults spelled out",
+        "value": { "kind": "scan", "mode": "upload", "multiple": false }
+      },
+      {
+        "name": "several offers in a row, returned to the page",
+        "value": {
+          "kind": "supplier-offer",
+          "mode": "return",
+          "multiple": true,
+          "context": { "offerId": "O-2026-0042" }
+        }
+      },
+      { "name": "kind at the longest", "value": { "kind": "abcdefghijklmnopqrstuvwxyz012345" } }
+    ],
+    "invalid": [
+      { "name": "kind with a capital", "value": { "kind": "Offer" }, "error": "invalid" },
+      { "name": "kind empty", "value": { "kind": "" }, "error": "invalid" },
+      {
+        "name": "kind 33 characters",
+        "value": { "kind": "abcdefghijklmnopqrstuvwxyz0123456" },
+        "error": "invalid"
+      },
+      { "name": "kind with a space", "value": { "kind": "supplier offer" }, "error": "invalid" },
+      { "name": "mode unknown", "value": { "mode": "save" }, "error": "invalid" },
+      { "name": "multiple not a boolean", "value": { "multiple": "yes" }, "error": "invalid" },
+      { "name": "context an array", "value": { "context": [1, 2] }, "error": "invalid" },
+      {
+        "name": "context over 4096 bytes",
+        "value": { "context": { "text": "@4097" } },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "one document, uploaded",
+        "value": {
+          "ok": true,
+          "documents": [
+            {
+              "name": "scan-2026-11-11.pdf",
+              "mime": "application/pdf",
+              "size": 482113,
+              "pages": 3,
+              "uploadId": "8c2f1a4e-5b0a-4f3e-9d57-2b6f1c9e7a10",
+              "upload": { "status": 200, "body": { "ok": true, "id": "doc-1" } }
+            }
+          ]
+        }
+      },
+      {
+        "name": "two documents returned, the second failed",
+        "value": {
+          "ok": true,
+          "documents": [
+            {
+              "name": "scan-1.pdf",
+              "mime": "application/pdf",
+              "size": 11,
+              "pages": 1,
+              "uploadId": "0b7d3f52-96e4-4a1c-8e2b-5d1f7a3c9b44",
+              "data": "aGVsbG8gd29ybGQ="
+            },
+            {
+              "name": "scan-2.pdf",
+              "uploadId": "6f1e9c27-3a4b-4d58-b7a0-12c4e8d5f931",
+              "error": "failed"
+            }
+          ]
+        }
+      },
+      {
+        "name": "a document the backend answered with HTML",
+        "value": {
+          "ok": true,
+          "documents": [
+            {
+              "name": "scan.pdf",
+              "mime": "application/pdf",
+              "size": 20,
+              "uploadId": "3d9a7b61-0c52-4e8f-a1d3-7b6e4f2c8a05",
+              "upload": { "status": 200, "body": null }
+            }
+          ]
+        }
+      },
+      {
+        "name": "cancelled before the first document",
+        "value": { "ok": false, "error": "cancelled" }
+      },
+      { "name": "no camera capability", "value": { "ok": false, "error": "capability" } },
+      { "name": "no scanner on this device", "value": { "ok": false, "error": "unavailable" } }
+    ],
+    "invalid": [
+      { "name": "no documents", "value": { "ok": true, "documents": [] }, "error": "failed" },
+      {
+        "name": "documents not a list",
+        "value": { "ok": true, "documents": "x" },
+        "error": "failed"
+      },
+      {
+        "name": "a document without uploadId",
+        "value": {
+          "ok": true,
+          "documents": [{ "name": "a.pdf", "mime": "application/pdf", "size": 1 }]
+        },
+        "error": "failed"
+      },
+      {
+        "name": "a document without size and no error",
+        "value": {
+          "ok": true,
+          "documents": [
+            {
+              "name": "a.pdf",
+              "mime": "application/pdf",
+              "uploadId": "8c2f1a4e-5b0a-4f3e-9d57-2b6f1c9e7a10"
+            }
+          ]
+        },
+        "error": "failed"
+      }
+    ]
+  }
+}

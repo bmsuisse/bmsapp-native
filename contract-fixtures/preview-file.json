@@ -1,0 +1,46 @@
+{
+  "description": "previewFile(options) (feature previewFile). \"{origin}\" stands for the origin of the web app's page. A valid option is sent as an absolute URL (\"sent\").",
+  "options": {
+    "valid": [
+      {
+        "name": "root-relative",
+        "value": { "url": "/api/offers/4711/file.pdf" },
+        "sent": { "url": "{origin}/api/offers/4711/file.pdf" }
+      },
+      {
+        "name": "absolute on the own origin, with a name",
+        "value": { "url": "{origin}/files/offer.pdf", "filename": "Offer 4711.pdf" },
+        "sent": { "url": "{origin}/files/offer.pdf", "filename": "Offer 4711.pdf" }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "another host",
+        "value": { "url": "https://other.example.com/a.pdf" },
+        "error": "invalid"
+      },
+      {
+        "name": "protocol-relative to another host",
+        "value": { "url": "//other.example.com/a.pdf" },
+        "error": "invalid"
+      },
+      { "name": "a data URL", "value": { "url": "data:text/plain,hello" }, "error": "invalid" },
+      { "name": "empty", "value": { "url": "" }, "error": "invalid" },
+      { "name": "url missing", "value": {}, "error": "invalid" },
+      {
+        "name": "filename not a string",
+        "value": { "url": "/a.pdf", "filename": 7 },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      { "name": "shown", "value": { "ok": true } },
+      { "name": "not found", "value": { "ok": false, "error": "failed", "status": 404 } },
+      { "name": "forbidden", "value": { "ok": false, "error": "failed", "status": 403 } },
+      { "name": "no preview possible", "value": { "ok": false, "error": "unavailable" } }
+    ],
+    "invalid": []
+  }
+}
