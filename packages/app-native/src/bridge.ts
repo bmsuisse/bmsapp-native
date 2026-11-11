@@ -197,6 +197,15 @@ export function can(capability: Capability): boolean {
 }
 
 /**
+ * Is this the answer of an app (or of the package) that cannot do the call: `unavailable`,
+ * or `unknownAction` from an app that predates it? Both mean "use your own UI"; the
+ * package keeps the original code in the result, so test with this instead of `===`.
+ */
+export function isUnavailable(result: { ok: boolean; error?: unknown }): boolean {
+  return !result.ok && (result.error === 'unavailable' || result.error === 'unknownAction')
+}
+
+/**
  * Does the app implement this feature of the contract? `false` outside the app
  * and in apps that predate `window.BMSNative.features`. Functions that depend
  * on a feature check this themselves and answer `unavailable` — use it to hide

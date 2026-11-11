@@ -103,8 +103,9 @@ class NativeDocumentUpload(BaseModel):
 
     #: The final HTTP status (after the app's one retry).
     status: int = Field(ge=100, le=599)
-    #: The JSON response of the backend, verbatim; `None` if it was not JSON.
-    body: dict[str, Any] | None
+    #: The response of the backend as the app saw it: the parsed JSON if it was
+    #: valid JSON (any JSON value), otherwise the raw response text.
+    body: Any
 
 
 class NativeDocument(BaseModel):
@@ -113,7 +114,9 @@ class NativeDocument(BaseModel):
     client input, check it like any other request body.
 
     A document that failed has `error` (`"failed"` or `"tooLarge"`); `mime` and
-    `size` may be missing then. Any other document has both. `data` (base64) comes
+    `size` may be missing then. Any other document has both. An upload that ended with
+    HTTP 400 or more is `"failed"` and still has `upload`; after a network error there is
+    no `upload`. `data` (base64) comes
     with mode `"return"`, `upload` with mode `"upload"`. JSON uses camelCase
     (`uploadId`); dump with `by_alias=True`.
     """
@@ -141,6 +144,8 @@ class NativeDocument(BaseModel):
                 raise ValueError("mime and size are required unless the document has an error")
             if self.size > MAX_NATIVE_DOCUMENT_BYTES:
                 raise ValueError(f"size is above {MAX_NATIVE_DOCUMENT_BYTES} bytes")
+        if self.upload is not None and self.upload.status >= 400 and self.error != "failed":
+            raise ValueError('an upload that ended with HTTP 400 or more is `error: "failed"`')
         if self.data is not None:
             try:
                 base64.b64decode(self.data, validate=True)

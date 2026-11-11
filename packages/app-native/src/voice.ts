@@ -18,7 +18,7 @@ export const DICTATE_LIMITS = {
 export type DictateOptions = {
   /** BCP-47, e.g. `'de-CH'`. Default: the device language. */
   locale?: string
-  /** 1 to 120; default 60. The sheet ends by itself after that. */
+  /** A whole number from 1 to 120; default 60. The sheet ends by itself after that. */
   maxSeconds?: number
   /** Names and terms the recognizer should expect (at most 50), e.g. article names. */
   contextualStrings?: readonly string[]
@@ -36,13 +36,12 @@ function dictateProblem(options: unknown): string | undefined {
   if (
     maxSeconds !== undefined &&
     !(
-      typeof maxSeconds === 'number' &&
-      Number.isFinite(maxSeconds) &&
-      maxSeconds >= 1 &&
-      maxSeconds <= DICTATE_LIMITS.maxSeconds
+      Number.isInteger(maxSeconds) &&
+      (maxSeconds as number) >= 1 &&
+      (maxSeconds as number) <= DICTATE_LIMITS.maxSeconds
     )
   ) {
-    return `maxSeconds has to be a number from 1 to ${DICTATE_LIMITS.maxSeconds}.`
+    return `maxSeconds has to be a whole number from 1 to ${DICTATE_LIMITS.maxSeconds}.`
   }
   if (contextualStrings !== undefined) {
     if (

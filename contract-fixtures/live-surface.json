@@ -125,6 +125,62 @@
           "title": 3
         },
         "error": "invalid"
+      },
+      {
+        "name": "the same field id twice",
+        "value": {
+          "id": "f",
+          "fields": [
+            {
+              "id": "a",
+              "type": "text"
+            },
+            {
+              "id": "a",
+              "type": "text"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "the same block id twice",
+        "value": {
+          "id": "s",
+          "blocks": [
+            {
+              "type": "divider",
+              "id": "x"
+            },
+            {
+              "type": "divider",
+              "id": "x"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "the same list item id twice",
+        "value": {
+          "id": "s",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                {
+                  "id": "l",
+                  "title": "a"
+                },
+                {
+                  "id": "l",
+                  "title": "b"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
       }
     ]
   },
@@ -203,6 +259,14 @@
           "type": "photo",
           "source": "camera"
         }
+      },
+      {
+        "name": "live: false on a photo field is fine",
+        "value": {
+          "id": "photo",
+          "type": "photo",
+          "live": false
+        }
       }
     ],
     "invalid": [
@@ -221,6 +285,58 @@
           "id": "photo",
           "type": "photo",
           "source": "page"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a photo field",
+        "value": {
+          "id": "f",
+          "type": "photo",
+          "live": true
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a scan field",
+        "value": {
+          "id": "f",
+          "type": "scan",
+          "live": true
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a signature field",
+        "value": {
+          "id": "f",
+          "type": "signature",
+          "live": true
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a repeat field",
+        "value": {
+          "id": "f",
+          "type": "repeat",
+          "live": true,
+          "fields": [
+            {
+              "id": "a",
+              "type": "text"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a info field",
+        "value": {
+          "id": "f",
+          "type": "info",
+          "live": true,
+          "value": "x"
         },
         "error": "invalid"
       }

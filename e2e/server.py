@@ -325,9 +325,9 @@ def _dictate(body: dict[str, Any]) -> dict[str, Any]:
         return _bad("locale has to be a BCP-47 string")
     seconds = body.get("maxSeconds")
     if "maxSeconds" in body and not (
-        isinstance(seconds, int | float) and not isinstance(seconds, bool) and 1 <= seconds <= 120
+        isinstance(seconds, int) and not isinstance(seconds, bool) and 1 <= seconds <= 120
     ):
-        return _bad("maxSeconds has to be 1 to 120")
+        return _bad("maxSeconds has to be a whole number from 1 to 120")
     strings = body.get("contextualStrings")
     if "contextualStrings" in body and not (
         isinstance(strings, list)
@@ -595,6 +595,11 @@ def _test_endpoints(router: APIRouter) -> None:
         body = await request.json()
         STATE["dedupe"] = bool(body.get("dedupe", False))
         STATE["upload_failures"] = dict(body.get("failures", {}))
+
+    @router.post("/test/html-upload")
+    async def html_upload() -> Response:
+        """An upload endpoint whose answer is not JSON."""
+        return Response("<html>Bad Gateway</html>", media_type="text/html")
 
     @router.post("/test/menu-expand")
     async def menu_expand(request: Request) -> None:

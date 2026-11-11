@@ -463,6 +463,7 @@ export function formLimitWarnings(def: NativeFormDef): string[] {
     )
   }
   if (def.fields && def.pages) warnings.push('Use either `fields` or `pages`, not both.')
+  warnings.push(...idWarnings({ fields: def.fields, pages: def.pages }))
   const pages = def.pages ?? []
   if (pages.length > limits.formPages) {
     warnings.push(`${pages.length} pages, the app takes at most ${limits.formPages}.`)
@@ -631,6 +632,7 @@ export function contentLimitWarnings(def: NativeContentDef): string[] {
       `The definition is ${bytes} bytes, the app takes at most ${limits.definitionBytes}.`
     )
   }
+  walk.warnings.push(...idWarnings({ blocks: def.blocks }))
   walkBlocks(def.blocks, 1, 'blocks', walk)
   if (walk.blocks > limits.contentBlocks) {
     walk.warnings.push(`${walk.blocks} blocks, the app takes at most ${limits.contentBlocks}.`)
@@ -664,6 +666,56 @@ export function contentLimitWarnings(def: NativeContentDef): string[] {
     )
   }
   return walk.warnings
+}
+
+// --- Ids that have to be unique -------------------------------------------------
+
+function duplicates(ids: Array<string | undefined>): string[] {
+  const seen = new Set<string>()
+  const twice = new Set<string>()
+  for (const id of ids) {
+    if (id === undefined) continue
+    if (seen.has(id)) twice.add(id)
+    seen.add(id)
+  }
+  return [...twice]
+}
+
+function blockIds(blocks: NativeContentBlock[]): { blocks: string[]; items: string[] } {
+  const out = { blocks: [] as string[], items: [] as string[] }
+  const visit = (list: NativeContentBlock[]) => {
+    for (const block of list) {
+      if (block.id !== undefined) out.blocks.push(block.id)
+      if (block.type === 'list') {
+        for (const item of block.items) if (item.id !== undefined) out.items.push(item.id)
+      }
+      if (block.type === 'card' || block.type === 'row') visit(block.blocks)
+    }
+  }
+  visit(blocks)
+  return out
+}
+
+/** Ids are unique per surface: among the fields, among the blocks and among the list items. */
+function idWarnings(def: {
+  fields?: NativeFormField[]
+  pages?: NativeFormPage[]
+  blocks?: NativeContentBlock[]
+}): string[] {
+  const warnings: string[] = []
+  const fields = [...(def.fields ?? []), ...(def.pages ?? []).flatMap((page) => page.fields)]
+  const inBlocks = blockFields(def.blocks ?? [])
+  for (const id of duplicates([...fields, ...inBlocks].map((f) => f.id))) {
+    warnings.push(`The field id "${id}" is used twice: ids are unique per surface.`)
+  }
+  const ids = blockIds(def.blocks ?? [])
+  for (const id of duplicates(ids.blocks)) {
+    warnings.push(`The block id "${id}" is used twice: ids are unique per surface.`)
+  }
+  for (const id of duplicates(ids.items)) {
+    warnings.push(`The list item id "${id}" is used twice: ids are unique per surface.`)
+  }
+  return warnings
 }
 
 // --- Round trip --------------------------------------------------------------
@@ -872,7 +924,10 @@ async function dispatchSearch(event: SurfaceSearchEvent): Promise<void> {
   }
   // The surface is gone, or the user typed on: a stale answer would show old results.
   if (liveHandlers.get(event.id) !== entry || entry.latest.get(fieldId) !== requestId) return
-  await call('surfaceSearchResult', { requestId, options: normalizeSearchOptions(options) })
+  await callFeature('pageSearch', 'surfaceSearchResult', {
+    requestId,
+    options: normalizeSearchOptions(options),
+  })
 }
 
 /** All form fields of a definition, pages included (not the inner fields of `repeat`). */
@@ -892,26 +947,52 @@ function usesPageSearch(fields: NativeFormField[]): boolean {
   return fields.some((f) => f.type === 'search' && f.source === 'page')
 }
 
-function withLiveFields(fields: NativeFormField[]): NativeFormField[] {
-  return fields.map((f) => (f.live === undefined && f.type !== 'info' ? { ...f, live: true } : f))
+/**
+ * The types whose value is a single value the app can report on every change. `photo`, `scan`
+ * and `signature` deliver files, `repeat` rows and `info` nothing: they are never `live`.
+ */
+const NOT_LIVE: ReadonlySet<string> = new Set(['photo', 'scan', 'signature', 'repeat', 'info'])
+
+function isLiveType(field: NativeFormField): boolean {
+  return !NOT_LIVE.has(field.type ?? 'text')
 }
 
-function withLiveBlocks(blocks: NativeContentBlock[]): NativeContentBlock[] {
+/**
+ * `live: true` on the scalar fields that do not say otherwise; a `live` on any other type
+ * is removed (the app would refuse it), development builds say so.
+ */
+function withLiveFields(fields: NativeFormField[], mark = true): NativeFormField[] {
+  return fields.map((f) => {
+    if (!isLiveType(f)) {
+      if (f.live !== true) return f // `live: false` is no claim
+      if (isDevelopment()) {
+        warn('live', [
+          `field "${f.id}" is of type ${f.type}: only scalar fields can be live, left out.`,
+        ])
+      }
+      const { live: _live, ...rest } = f
+      return rest as NativeFormField
+    }
+    return mark && f.live === undefined ? { ...f, live: true } : f
+  })
+}
+
+function withLiveBlocks(blocks: NativeContentBlock[], mark = true): NativeContentBlock[] {
   return blocks.map((block): NativeContentBlock => {
-    if (block.type === 'fields') return { ...block, fields: withLiveFields(block.fields) }
+    if (block.type === 'fields') return { ...block, fields: withLiveFields(block.fields, mark) }
     if (block.type === 'card' || block.type === 'row') {
-      return { ...block, blocks: withLiveBlocks(block.blocks) }
+      return { ...block, blocks: withLiveBlocks(block.blocks, mark) }
     }
     return block
   })
 }
 
-function withLiveForm<T extends Pick<NativeFormDef, 'fields' | 'pages'>>(def: T): T {
+function withLiveForm<T extends Pick<NativeFormDef, 'fields' | 'pages'>>(def: T, mark = true): T {
   return {
     ...def,
-    ...(def.fields && { fields: withLiveFields(def.fields) }),
+    ...(def.fields && { fields: withLiveFields(def.fields, mark) }),
     ...(def.pages && {
-      pages: def.pages.map((page) => ({ ...page, fields: withLiveFields(page.fields) })),
+      pages: def.pages.map((page) => ({ ...page, fields: withLiveFields(page.fields, mark) })),
     }),
   }
 }
@@ -1088,12 +1169,13 @@ export function showForm(
   const validate = options.validate ?? isDevelopment()
   if (validate) warn('showForm', formLimitWarnings(def))
   const { onSubmit, onChange, onSearch } = options
-  if (missingLiveFeature(formFields(def), !!onChange, !!onSearch)) {
+  // `live` only on scalar fields: set on all of them with onChange, removed from any other.
+  const base = withLiveForm(def, !!onChange)
+  if (missingLiveFeature(formFields(base), !!onChange, !!onSearch)) {
     return Promise.resolve({ ok: false, error: 'unavailable' })
   }
   const live = onChange || onSearch ? { onChange, onSearch } : undefined
-  if (!onSubmit && !live) return open<NativeFormResult>('showForm', def)
-  const base = onChange ? withLiveForm(def) : def
+  if (!onSubmit && !live) return open<NativeFormResult>('showForm', base)
   const payload: NativeFormDef = {
     ...base,
     id: def.id ?? newSurfaceId(),
@@ -1149,12 +1231,12 @@ export function showContent(
   const validate = options.validate ?? isDevelopment()
   if (validate) warn('showContent', contentLimitWarnings(def))
   const { onAction, onChange, onSearch } = options
-  if (missingLiveFeature(blockFields(def.blocks), !!onChange, !!onSearch)) {
+  const blocks = withLiveBlocks(def.blocks, !!onChange)
+  if (missingLiveFeature(blockFields(blocks), !!onChange, !!onSearch)) {
     return Promise.resolve({ ok: false, error: 'unavailable' })
   }
   const live = onChange || onSearch ? { onChange, onSearch } : undefined
-  if (!onAction && !live) return open<NativeContentResult>('showContent', def)
-  const blocks = onChange ? withLiveBlocks(def.blocks) : def.blocks
+  if (!onAction && !live) return open<NativeContentResult>('showContent', { ...def, blocks })
   const payload: NativeContentDef = {
     ...def,
     id: def.id ?? newSurfaceId(),
@@ -1252,7 +1334,11 @@ function updateProblem(update: unknown): string | undefined {
     if (update[key] !== undefined && !Array.isArray(update[key])) return `${key} has to be a list.`
   }
   if (update.values !== undefined && !isRecord(update.values)) return 'values has to be an object.'
-  return undefined
+  return idWarnings({
+    fields: update.fields as NativeFormField[] | undefined,
+    pages: update.pages as NativeFormPage[] | undefined,
+    blocks: update.blocks as NativeContentBlock[] | undefined,
+  })[0]
 }
 
 /**
@@ -1294,9 +1380,9 @@ export async function updateSurface(
   const live = liveHandlers.get(update.id)?.onChange !== undefined
   const payload: UpdateSurfaceOptions = {
     ...update,
-    ...(live && update.fields && { fields: withLiveFields(update.fields) }),
-    ...(live && update.pages && { pages: withLiveForm({ pages: update.pages }).pages }),
-    ...(live && update.blocks && { blocks: withLiveBlocks(update.blocks) }),
+    ...(update.fields && { fields: withLiveFields(update.fields, live) }),
+    ...(update.pages && { pages: withLiveForm({ pages: update.pages }, live).pages }),
+    ...(update.blocks && { blocks: withLiveBlocks(update.blocks, live) }),
   }
   const answer = await callFeature('liveSurfaces', 'updateSurface', { ...payload })
   if (answer.ok) return { ok: true }

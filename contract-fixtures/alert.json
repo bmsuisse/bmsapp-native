@@ -242,6 +242,23 @@
           ]
         },
         "error": "invalid"
+      },
+      {
+        "name": "two actions with the same id",
+        "value": {
+          "title": "T",
+          "actions": [
+            {
+              "id": "a",
+              "label": "A"
+            },
+            {
+              "id": "a",
+              "label": "B"
+            }
+          ]
+        },
+        "error": "invalid"
       }
     ]
   },

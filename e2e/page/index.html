@@ -410,6 +410,7 @@
         }
 
         async function uploadOnce(spec, bytes, uploadId, kind, context, dropResponse) {
+          if (spec.offline) return null // a network error on every attempt
           const body = new FormData()
           body.set('device_id', 'e2e-device')
           body.set('user_email', 'anna@example.com')
@@ -418,10 +419,20 @@
           if (context) body.set('context', JSON.stringify(context))
           body.set('file', new Blob([bytes], { type: spec.mime || 'application/pdf' }), spec.name)
           try {
-            const response = await fetch('/api/documents', { method: 'POST', body })
+            const response = await fetch(spec.endpoint || '/api/documents', {
+              method: 'POST',
+              body,
+            })
             if (dropResponse) throw new Error('response lost')
-            const json = await response.json().catch(() => null)
-            return { status: response.status, body: json && typeof json === 'object' ? json : null }
+            // The parsed JSON if it is valid JSON, otherwise the raw text.
+            const text = await response.text()
+            let parsed = text
+            try {
+              parsed = JSON.parse(text)
+            } catch {
+              // not JSON: the raw text
+            }
+            return { status: response.status, body: parsed }
           } catch {
             return null // network error
           }
@@ -485,7 +496,7 @@
             : (step.documents || []).slice(0, 1)
           if (chosen.length === 0) return failure('cancelled')
           // Photos are delivered as JPEG.
-          const specs = chosen.map((s) => (s.photo ? { ...s, mime: 'image/jpeg' } : s))
+          const specs = chosen.map((s) => (s.photo ? toJpeg(s) : s))
           docs.opened.push({ action: 'pickFiles', options })
           const documents = await makeDocuments(specs, {
             mode: options.mode || 'return',
@@ -495,7 +506,16 @@
           return { ok: true, documents }
         }
 
-        window.__share = async (specs) => {
+        // Photos and HEIC arrive as JPEG: image/jpeg and a .jpg name.
+        const toJpeg = (spec) => ({
+          ...spec,
+          mime: 'image/jpeg',
+          name: spec.name.replace(/\.[^.]+$/, '') + '.jpg',
+        })
+        const isHeic = (spec) => /heic|heif/i.test(spec.mime || '') || /\.hei[cf]$/i.test(spec.name)
+
+        window.__share = async (rawSpecs) => {
+          const specs = rawSpecs.map((s) => (isHeic(s) ? toJpeg(s) : s))
           const documents = await makeDocuments(specs, { mode: 'upload', kind: 'shared' })
           if (typeof window.onNativeDocumentsReceived === 'function') {
             window.onNativeDocumentsReceived({ documents })
@@ -516,6 +536,10 @@
           }
           const step = voice.script.shift() || { error: 'cancelled' }
           voice.opened.push(payload || {})
+          // A locale the device has no recognizer for.
+          if (payload && payload.locale && !/^(de|en|fr|it)(-[A-Z]{2})?$/.test(payload.locale)) {
+            return failure('unavailable', 'No recognizer for this language.')
+          }
           if (step.error) return failure(step.error, step.message)
           return {
             ok: true,
@@ -788,7 +812,12 @@
 
         function showPickerCall(payload) {
           const step = picker.script.shift() || { dismiss: true }
-          picker.shown.push({ ...payload, popover: !!payload.anchor })
+          // A preselected value that is not among the options is ignored.
+          const preselected =
+            payload.kind === 'option' && payload.options.some((o) => o.value === payload.value)
+              ? payload.value
+              : null
+          picker.shown.push({ ...payload, popover: !!payload.anchor, preselected })
           if (step.error) return failure(step.error)
           if (step.dismiss) return failure('cancelled')
           if (payload.kind === 'option' && !payload.options.some((o) => o.value === step.value)) {
@@ -833,14 +862,17 @@
           },
           selectActionButtonMenu(buttonId, id) {
             const button = chromeState.actionButtons.find((b) => b.id === buttonId)
-            if (!button || !button.menu || !has('menus') || !findMenuItem(button.menu, id))
-              return false
+            if (!button || !button.menu || !has('menus')) return false
+            const item = findMenuItem(button.menu, id)
+            // A lazy item in a menu of the bar is a disabled row: it cannot be chosen.
+            if (!item || item.children === 'lazy') return false
             window.onNativeActionButtonMenuSelect?.({ buttonId, id })
             return true
           },
           selectTitleMenu(id) {
             const title = chromeState.title
-            if (!title || !title.menu || !findMenuItem(title.menu, id)) return false
+            const item = title && title.menu ? findMenuItem(title.menu, id) : null
+            if (!item || item.children === 'lazy') return false
             window.onNativeTitleMenuSelect?.({ id })
             return true
           },
@@ -861,6 +893,20 @@
                 resolve(true)
               }, chromeApp.searchDebounce)
             )
+          },
+          // A change of the scope calls `onNativeSearch` with the current query.
+          selectScope(id) {
+            const search = chromeState.search
+            if (!search || !(search.scopes || []).some((s) => s.id === id)) return false
+            search.scope = id
+            window.onNativeSearch?.({
+              id: search.id,
+              query: search.value ?? '',
+              scope: id,
+              submitted: false,
+              source: 'typing',
+            })
+            return true
           },
           submitSearch(query) {
             const search = chromeState.search
@@ -938,9 +984,20 @@
             ['sidebar', 'sidebar'],
             ['undo', 'undoGestures'],
           ]
+          const typed = chromeState.search ? chromeState.search.value : undefined
+          const lastSent = chromeState.lastSearchValue
           chromeState.actionButtons = structuredClone(message.actionButtons || [])
           for (const [key, feature] of additions) {
             chromeState[key] = has(feature) && message[key] ? structuredClone(message[key]) : null
+          }
+          if (chromeState.search) {
+            // The page's `value` is applied only if it differs from the last value the page sent:
+            // otherwise what the user typed stays.
+            const sent = message.search.value
+            if (sent === lastSent && typed !== undefined) chromeState.search.value = typed
+            chromeState.lastSearchValue = sent
+          } else {
+            chromeState.lastSearchValue = undefined
           }
           if (chromeState.sidebar) {
             // Sending the sidebar again keeps the selection.
@@ -1024,6 +1081,23 @@
             window.onNativeDocumentTap?.({ id: viewer.open.id, highlightId, page, x, y })
             return true
           },
+          // A tap at a point: the topmost (last in the list) highlight that contains it.
+          tapAt(page, x, y) {
+            if (!viewer.open) return false
+            const hit = [...viewer.open.highlights]
+              .reverse()
+              .find(
+                (h) => h.page === page && x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h
+              )
+            window.onNativeDocumentTap?.({
+              id: viewer.open.id,
+              highlightId: hit ? hit.id : null,
+              page,
+              x,
+              y,
+            })
+            return true
+          },
           scrollToPage(page) {
             if (!viewer.open) return false
             viewer.open.page = page
@@ -1038,16 +1112,20 @@
         }
 
         async function showDocumentCall(payload) {
+          if (viewer.open) return failure('busy', 'A viewer is already open.')
           const response = await fetch(payload.url, { credentials: 'include' })
           if (response.status >= 400) return { ok: false, error: 'failed', status: response.status }
           const id = payload.id || nextId('doc')
+          const highlights = structuredClone(payload.highlights || [])
+          // `selected` wins over `page`; one that is not a highlight is ignored.
+          const target = highlights.find((h) => h.id === payload.selected)
           viewer.open = {
             id,
             url: payload.url,
             title: payload.title,
-            page: payload.page || 1,
-            highlights: structuredClone(payload.highlights || []),
-            selected: payload.selected ?? null,
+            page: target ? target.page : payload.page || 1,
+            highlights,
+            selected: target ? target.id : null,
           }
           try {
             return await new Promise((resolve) => (viewer.resolve = resolve))
@@ -1060,12 +1138,15 @@
           const open = viewer.open
           if (!open || open.id !== payload.id) return failure('notFound')
           if (payload.highlights) open.highlights = structuredClone(payload.highlights)
-          if (payload.selected !== undefined) {
-            open.selected = payload.selected
-            const target = open.highlights.find((h) => h.id === payload.selected)
-            if (target) open.page = target.page // the viewer scrolls to it
-          }
           if (payload.page) open.page = payload.page
+          if (payload.selected !== undefined) {
+            // `selected` wins over `page` and scrolls to it; an unknown one is ignored.
+            const target = open.highlights.find((h) => h.id === payload.selected)
+            if (target) {
+              open.selected = target.id
+              open.page = target.page
+            }
+          }
           return { ok: true }
         }
 
@@ -1115,10 +1196,15 @@
           if (query.length < (field.minQueryLength ?? 2)) return null
           if (typeof window.onNativeSurfaceSearch !== 'function') return null
           const requestId = nextId('search')
-          const record = { requestId, options: null, timedOut: false }
+          const record = { requestId, options: null, timedOut: false, retry: false }
           surfaces.found[fieldId] = record
+          // No answer in time: an empty result and a way to try again.
           setTimeout(() => {
-            if (record.options === null) record.timedOut = true
+            if (record.options === null) {
+              record.timedOut = true
+              record.retry = true
+              record.options = []
+            }
           }, surfaces.searchTimeout)
           window.onNativeSurfaceSearch({ id: surfaces.open, fieldId, query, requestId })
           return requestId
@@ -1140,16 +1226,15 @@
         function updateSurfaceCall(payload) {
           if (!surfaces.open || surfaces.open !== payload.id) return failure('notFound')
           const before = surfaceIds(surfaces.def)
-          for (const key of [
-            'title',
-            'subtitle',
-            'blocks',
-            'actions',
-            'values',
-            'fields',
-            'pages',
-          ]) {
+          for (const key of ['title', 'subtitle', 'blocks', 'actions', 'fields', 'pages']) {
             if (payload[key] !== undefined) surfaces.def[key] = structuredClone(payload[key])
+          }
+          // `values` MERGES into the values of the surface, everything else is replaced.
+          if (payload.values !== undefined) {
+            surfaces.def.values = {
+              ...(surfaces.def.values || {}),
+              ...structuredClone(payload.values),
+            }
           }
           const after = surfaceIds(surfaces.def)
           // Where ids persist, focus, entered values and scroll position are kept.
@@ -1170,8 +1255,17 @@
           return { ok: true }
         }
 
+        // System shortcuts (Cmd+W closes the web app) are ignored, the first of two identical
+        // commands wins, letters are compared case-insensitively.
         function setKeyCommandsCall(payload) {
-          keys.commands = payload.commands
+          const signature = (c) => c.input.toLowerCase() + '|' + [...c.modifiers].sort().join()
+          const seen = new Set()
+          keys.commands = payload.commands.filter((c) => {
+            if (signature(c) === 'w|command') return false
+            if (seen.has(signature(c))) return false
+            seen.add(signature(c))
+            return true
+          })
           return { ok: true }
         }
 
@@ -1211,8 +1305,12 @@
           const answer = await sendCall(action, payload)
           if (action === 'scanDocument') return answer.ok ? scanDocumentCall(payload) : answer
           if (action === 'pickFiles') return answer.ok ? pickFilesCall(payload) : answer
-          if (action === 'consumeReceivedDocuments')
+          if (action === 'consumeReceivedDocuments') {
+            if (!capabilities.includes('receiveDocuments')) {
+              return failure('capability', 'No receiveDocuments capability.')
+            }
             return { ok: true, documents: docs.queue.splice(0) }
+          }
           if (action === 'dictate') return answer.ok ? dictateCall(payload) : answer
           if (action === 'previewFile') return answer.ok ? previewFileCall(payload) : answer
           if (action === 'getLayout') return { ok: true, ...layout }

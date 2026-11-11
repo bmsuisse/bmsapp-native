@@ -120,7 +120,7 @@ describe('menuLimitWarnings', () => {
       menuLimitWarnings([
         {
           items: [
-            { id: 'a', label: 'A', children: items(0) },
+            { id: 'a', label: 'A', children: items(1) },
             { id: 'a', label: 'B' },
           ],
         },
@@ -177,7 +177,7 @@ describe('showMenu', () => {
     installBridge({ call: answer({ ok: false, error: 'unknownAction' }) })
     expect(await showMenu({ anchor: ANCHOR, sections })).toEqual({
       ok: false,
-      error: 'unavailable',
+      error: 'unknownAction',
     })
   })
 
@@ -402,7 +402,7 @@ describe('showAlert', () => {
     installBridge({ call: answer({ ok: false, error: 'unknownAction' }) })
     expect(await showAlert({ title: 'T', actions: [cancel] })).toEqual({
       ok: false,
-      error: 'unavailable',
+      error: 'unknownAction',
     })
   })
 })
@@ -558,11 +558,12 @@ describe('setChrome additions', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
-  it('warns in development builds about what the app lacks and about limits, and still sends', () => {
+  it('warns in development builds about what the app lacks and about limits, and leaves it out', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const bridge = installBridge({ features: ['menus'] })
     setChrome({ search, segments: { id: 'v', items: [{ id: 'a', label: 'A' }], selected: 'a' } })
-    expect(bridge.postMessage).toHaveBeenCalledOnce()
+    // Both parts need features that this app does not list: nothing is left to send.
+    expect(bridge.postMessage).not.toHaveBeenCalled()
     const text = warn.mock.calls.map((c) => String(c[0])).join('\n')
     expect(text).toContain('navSearch')
     expect(text).toContain('segments has 1 items')
@@ -760,6 +761,6 @@ describe('setKeyCommands', () => {
   it('is unavailable outside the app and for unknownAction', async () => {
     expect(await setKeyCommands({ commands: [] })).toEqual({ ok: false, error: 'unavailable' })
     installBridge({ call: answer({ ok: false, error: 'unknownAction' }) })
-    expect(await setKeyCommands({ commands: [] })).toEqual({ ok: false, error: 'unavailable' })
+    expect(await setKeyCommands({ commands: [] })).toEqual({ ok: false, error: 'unknownAction' })
   })
 })

@@ -255,6 +255,10 @@ REPEAT_INNER_FIELD_TYPES = frozenset(
     {"text", "number", "select", "toggle", "date", "textarea", "stepper"}
 )
 
+#: The field types that can never be `live`: they deliver files, rows or nothing.
+#: Every other (scalar) type can.
+NOT_LIVE_FIELD_TYPES = frozenset({"photo", "scan", "signature", "repeat", "info"})
+
 #: `photo.max` is 1 to this value (default in the app: 5).
 MAX_PHOTOS_PER_FIELD = 10
 #: `photo.max_dimension` is at least this many pixels ...
@@ -367,7 +371,7 @@ class ActionField(_CamelModel):
     source: Literal["camera", "library", "both", "page"] | None = None
     #: Native forms and content only (feature `liveSurfaces`): every change of
     #: the value calls `window.onNativeSurfaceChange` (text input debounced
-    #: 300 ms).
+    #: 300 ms). Scalar types only: not `photo`, `scan`, `signature`, `repeat`, `info`.
     live: bool | None = None
     #: `photo` only: longest side in pixels after downscaling, 256 to 4096.
     #: Default 2048.
@@ -390,6 +394,10 @@ class ActionField(_CamelModel):
             raise ValueError(f"`{self.id}`: `fields` only belongs to the type `repeat`.")
         if self.type in ("multiselect", "segmented") and not self.options:
             raise ValueError(f"`{self.id}`: type `{self.type}` needs `options`.")
+        if self.live is True and self.type in NOT_LIVE_FIELD_TYPES:
+            raise ValueError(
+                f"`{self.id}`: a `{self.type}` field cannot be `live`, only scalar fields can."
+            )
         if self.source == "page" and self.type != "search":
             raise ValueError(f"`{self.id}`: `source: page` only belongs to the type `search`.")
         _check_ranges(self)

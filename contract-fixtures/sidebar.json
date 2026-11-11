@@ -76,6 +76,32 @@
             ]
           }
         }
+      },
+      {
+        "name": "three swipe actions and one selected item",
+        "value": {
+          "sidebar": {
+            "title": "T",
+            "sections": [
+              {
+                "items": [
+                  {
+                    "id": "o1",
+                    "label": "O",
+                    "selected": true,
+                    "trailingActions": {
+                      "@repeat": 3,
+                      "of": {
+                        "id": "a{k}",
+                        "label": "A{k}"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
       }
     ],
     "invalid": [
@@ -167,6 +193,57 @@
             "title": "T",
             "search": {},
             "sections": []
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "four swipe actions",
+        "value": {
+          "sidebar": {
+            "title": "T",
+            "sections": [
+              {
+                "items": [
+                  {
+                    "id": "o1",
+                    "label": "O",
+                    "trailingActions": {
+                      "@repeat": 4,
+                      "of": {
+                        "id": "a{k}",
+                        "label": "A{k}"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "two selected items",
+        "value": {
+          "sidebar": {
+            "title": "T",
+            "sections": [
+              {
+                "items": [
+                  {
+                    "id": "o1",
+                    "label": "O1",
+                    "selected": true
+                  },
+                  {
+                    "id": "o2",
+                    "label": "O2",
+                    "selected": true
+                  }
+                ]
+              }
+            ]
           }
         },
         "error": "invalid"

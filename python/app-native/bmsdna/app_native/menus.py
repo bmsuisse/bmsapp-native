@@ -59,14 +59,15 @@ class MenuItem(_CamelModel):
     checked: bool | None = None
     #: A submenu: sections, or `"lazy"` to load them when the user opens the item
     #: (the page answers with `menuItems` within 5 seconds).
-    children: list[MenuSection] | Literal["lazy"] | None = None
+    children: Annotated[list[MenuSection], Field(min_length=1)] | Literal["lazy"] | None = None
     #: Lazy items only: the disabled row shown if the page does not answer in time.
     lazy_failed_label: str | None = None
 
 
 class MenuSection(_CamelModel):
     title: str | None = None
-    items: list[MenuItem]
+    #: At least one: an empty section is `invalid`.
+    items: list[MenuItem] = Field(min_length=1)
 
 
 class MenuPreview(_CamelModel):
@@ -89,6 +90,8 @@ def check_menu_sections(
 
     For the sections that answer a lazy item, pass the `depth` of that item plus one
     and what the menu already has: `taken_ids` and `taken_items`."""
+    if not sections or any(not section.items for section in sections):
+        raise ValueError("A menu needs at least one section, and every section at least one item.")
     ids = set(taken_ids)
     total = _walk(sections, depth, ids)
     if taken_items + total > MAX_MENU_ITEMS:
@@ -120,7 +123,8 @@ class NativeMenu(_CamelModel):
 
     id: str | None = Field(default=None, min_length=1)
     preview: MenuPreview | None = None
-    sections: list[MenuSection]
+    #: At least one: an empty menu is `invalid`.
+    sections: list[MenuSection] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _limits(self) -> NativeMenu:

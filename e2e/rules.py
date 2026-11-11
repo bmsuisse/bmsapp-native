@@ -98,6 +98,9 @@ def _alert_actions_problem(actions: Any) -> str | None:
     if not isinstance(actions, list) or not 1 <= len(actions) <= 6:
         return "1 to 6 actions"
     cancels = 0
+    ids = [a.get("id") for a in actions if isinstance(a, dict)]
+    if len(set(ids)) != len(ids):
+        return "action ids are unique"
     for action in actions:
         if not isinstance(action, dict) or not _text(action.get("id")):
             return "an action needs an id"
@@ -162,6 +165,33 @@ def update_surface_problem(body: dict[str, Any]) -> str | None:
             return f"{key} has to be a list"
     if "values" in body and not isinstance(body["values"], dict):
         return "values has to be an object"
+    return _duplicate_ids_problem(body)
+
+
+def _duplicate_ids_problem(body: dict[str, Any]) -> str | None:
+    """Ids are unique per surface: among the fields, the blocks and the list items."""
+    fields = list(body.get("fields") or [])
+    for page in body.get("pages") or []:
+        fields.extend(page.get("fields") or [] if isinstance(page, dict) else [])
+    blocks: list[str] = []
+    items: list[str] = []
+
+    def visit(entries: Any) -> None:
+        for block in entries if isinstance(entries, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("id") is not None:
+                blocks.append(block["id"])
+            fields.extend(block.get("fields") or [] if block.get("type") == "fields" else [])
+            for item in block.get("items") or [] if block.get("type") == "list" else []:
+                if isinstance(item, dict) and item.get("id") is not None:
+                    items.append(item["id"])
+            visit(block.get("blocks"))
+
+    visit(body.get("blocks"))
+    for ids in ([f.get("id") for f in fields if isinstance(f, dict)], blocks, items):
+        if len(set(ids)) != len(ids):
+            return "ids are unique per surface"
     return None
 
 
@@ -272,6 +302,8 @@ def picker_problem(body: dict[str, Any]) -> str | None:
     if kind == "date":
         if any(key in body and _date_problem(body[key]) for key in ("value", "min", "max")):
             return "dates are YYYY-MM-DD"
+        if "min" in body and "max" in body and body["min"] > body["max"]:
+            return "min is after max"
         return None
     options = body.get("options")
     if not isinstance(options, list) or not 1 <= len(options) <= 200:
@@ -286,11 +318,23 @@ def picker_problem(body: dict[str, Any]) -> str | None:
     return None
 
 
+def _has_lazy(sections: Any) -> bool:
+    return any(
+        item.get("children") == "lazy" or _has_lazy(item.get("children"))
+        for section in sections or []
+        if isinstance(section, dict)
+        for item in section.get("items") or []
+        if isinstance(item, dict)
+    )
+
+
 def chrome_problem(chrome: dict[str, Any]) -> str | None:
     """The 2026-11b parts of `setChrome`: title, search, segments, sidebar, undo and the
     menus of action buttons. The app drops what is invalid."""
     for button in chrome.get("actionButtons") or []:
         if isinstance(button, dict) and "menu" in button:
+            if _has_lazy(button["menu"]):
+                return "lazy children only work in showMenu"
             try:
                 NativeMenu.model_validate({"sections": button["menu"]})
             except ValidationError as error:
@@ -314,6 +358,8 @@ def _title_problem(title: Any) -> str | None:
     if "subtitle" in title and not isinstance(title["subtitle"], str):
         return "title.subtitle"
     if "menu" in title:
+        if _has_lazy(title["menu"]):
+            return "lazy children only work in showMenu"
         try:
             NativeMenu.model_validate({"sections": title["menu"]})
         except ValidationError as error:
@@ -374,6 +420,7 @@ def _sidebar_problem(sidebar: Any) -> str | None:
     if not isinstance(sections, list):
         return "sections"
     count = 0
+    selected = 0
     for section in sections:
         if not isinstance(section, dict) or not isinstance(section.get("items"), list):
             return "a section needs items"
@@ -385,9 +432,15 @@ def _sidebar_problem(sidebar: Any) -> str | None:
                 and isinstance(item.get("label"), str)
             ):
                 return "an item needs an id and a label"
-            for action in item.get("trailingActions") or []:
+            actions = item.get("trailingActions") or []
+            if len(actions) > 3:
+                return "at most 3 swipe actions"
+            selected += item.get("selected") is True
+            for action in actions:
                 if not (isinstance(action, dict) and _text(action.get("id"))):
                     return "an action needs an id"
+    if selected > 1:
+        return "at most one selected item"
     return "at most 300 items" if count > 300 else None
 
 

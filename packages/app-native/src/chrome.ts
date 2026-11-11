@@ -129,6 +129,10 @@ export type ChromeUndo = {
 export const CHROME_LIMITS = {
   segments: { min: 2, max: 5 },
   sidebarItems: 300,
+  /** Swipe actions of one sidebar item. */
+  sidebarActions: 3,
+  /** Items of the sidebar that are `selected`. */
+  sidebarSelected: 1,
 } as const
 
 export type BottomBarItem = {
@@ -284,6 +288,7 @@ function sidebarWarnings(sidebar: unknown): string[] {
   const { sections } = sidebar
   if (!Array.isArray(sections)) return [...warnings, 'sidebar.sections has to be a list.']
   let count = 0
+  let selected = 0
   for (const [s, section] of sections.entries()) {
     if (!isRecord(section) || !Array.isArray(section.items)) {
       warnings.push(`sidebar.sections[${s}] needs a list of items.`)
@@ -296,10 +301,14 @@ function sidebarWarnings(sidebar: unknown): string[] {
         warnings.push(`${at} needs an id and a label.`)
         continue
       }
-      for (const [a, action] of (Array.isArray(item.trailingActions)
-        ? item.trailingActions
-        : []
-      ).entries()) {
+      if (item.selected === true) selected += 1
+      const actions = Array.isArray(item.trailingActions) ? item.trailingActions : []
+      if (actions.length > CHROME_LIMITS.sidebarActions) {
+        warnings.push(
+          `${at} has ${actions.length} swipe actions, the app takes at most ${CHROME_LIMITS.sidebarActions}.`
+        )
+      }
+      for (const [a, action] of actions.entries()) {
         if (!isRecord(action) || !nonEmptyString(action.id) || typeof action.label !== 'string') {
           warnings.push(`${at}.trailingActions[${a}] needs an id and a label.`)
         }
@@ -310,6 +319,9 @@ function sidebarWarnings(sidebar: unknown): string[] {
     warnings.push(
       `sidebar has ${count} items, the app takes at most ${CHROME_LIMITS.sidebarItems}.`
     )
+  }
+  if (selected > CHROME_LIMITS.sidebarSelected) {
+    warnings.push(`sidebar has ${selected} selected items, the app takes at most one.`)
   }
   return warnings
 }
@@ -379,6 +391,33 @@ function missingFeatures(chrome: Chrome): string[] {
 }
 
 /**
+ * What the app can take of `chrome`: parts whose feature the app does not list are left out
+ * (it would ignore them anyway), and so are menus with lazy items in the navigation bar (only
+ * `showMenu` can answer a lazy item). Returns `null` if nothing is left of a chrome that
+ * consisted of such parts only.
+ */
+function supportedChrome(chrome: Chrome): Chrome | null {
+  const copy: Chrome = { ...chrome }
+  for (const [key, feature] of FEATURE_OF_KEY) {
+    if (copy[key] !== undefined && !hasFeature(feature)) delete copy[key]
+  }
+  if (copy.title?.menu !== undefined && hasLazy(copy.title.menu)) {
+    const { menu: _menu, ...title } = copy.title
+    copy.title = title
+  }
+  if (Array.isArray(copy.actionButtons)) {
+    copy.actionButtons = copy.actionButtons.map((button) => {
+      if (button?.menu === undefined) return button
+      if (hasFeature('menus') && !hasLazy(button.menu)) return button
+      const { menu: _menu, ...rest } = button
+      return rest
+    })
+  }
+  const dropped = Object.keys(chrome).length > 0 && Object.keys(copy).length === 0
+  return dropped ? null : copy
+}
+
+/**
  * Native chrome (menu, action buttons, bottom bar, and since 2026-11b the title, search
  * field, segments, iPad sidebar and undo) for this web app. Taps arrive via
  * `on('menuSelect' | 'actionButtonTap' | 'bottomBarTap' | 'actionButtonMenuSelect' |
@@ -387,16 +426,18 @@ function missingFeatures(chrome: Chrome): string[] {
  *
  * No-op outside the app, so the 2026-11b additions are simply ignored in the browser:
  * keep your own UI for them (`hasFeature('navSearch')` and friends tell whether the app
- * draws them). Omitting `search`, `segments`, `sidebar` or `undo` removes it again.
- * In development builds the limits of the additions are checked (`chromeLimitWarnings`)
- * and a part the app does not list as a feature is reported; the payload is sent
- * either way.
+ * draws them). **A part whose feature the app does not list is not sent**, and neither is a
+ * menu of the bar that contains `children: 'lazy'` (that only works with `showMenu`);
+ * a button whose menu is left out fires `actionButtonTap`. Omitting `search`, `segments`,
+ * `sidebar` or `undo` removes it again. In development builds the limits of the additions
+ * are checked (`chromeLimitWarnings`) and what is left out is reported.
  */
 export function setChrome(chrome: Chrome): void {
   if (!isNativeApp()) return
   if (isDevelopment())
     warn('setChrome', [...chromeLimitWarnings(chrome), ...missingFeatures(chrome)])
-  post('setChrome', chrome)
+  const supported = supportedChrome(chrome)
+  if (supported) post('setChrome', supported)
 }
 
 /**

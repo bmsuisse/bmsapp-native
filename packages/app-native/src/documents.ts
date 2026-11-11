@@ -36,11 +36,12 @@ export type NativeDocumentUpload = {
   /** The final HTTP status (after the app's one retry). */
   status: number
   /**
-   * The JSON response of the backend verbatim (for the document router of
-   * `bmsdna-app-native`: `{"ok": true, "id": "…"}`), `null` if it was not JSON.
-   * It passes through the page: the backend must not put secrets into it.
+   * The response of your backend as the app saw it: the parsed JSON if it was valid JSON
+   * (for the document router of `bmsdna-app-native`: `{"ok": true, "id": "…"}`), otherwise
+   * the raw response text as a string. It passes through the page: the backend must not put
+   * secrets into it.
    */
-  body: Record<string, unknown> | null
+  body: unknown
 }
 
 type NativeDocumentFields = {
@@ -61,7 +62,8 @@ type NativeDocumentFields = {
  *
  * A document that failed carries `error` (`failed`, or `tooLarge` beyond
  * 25,000,000 bytes); only `name` and `uploadId` are certain then. Check
- * `error` first.
+ * `error` first. An upload that ended with HTTP 400 or more is `failed` and still has
+ * `upload: { status, body }`; after a network error there is no `upload` at all.
  */
 export type NativeDocument =
   | (NativeDocumentFields & {

@@ -3,6 +3,7 @@
 // the web app. Details: docs/webapp-chrome-guide.md
 
 import { call, hasFeature } from './bridge.js'
+import { callFeature } from './internal.js'
 
 /** What triggered the back request: the native back button or the left-edge swipe. */
 export type BackSource = 'button' | 'swipe'
@@ -41,7 +42,7 @@ async function answer(payload: unknown): Promise<void> {
   })
   const handled = await Promise.race([ask(source), timeout])
   clearTimeout(timer)
-  await call('backResult', { handled })
+  await callFeature('backInterception', 'backResult', { handled })
 }
 
 function enable(): void {

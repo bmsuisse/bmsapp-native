@@ -427,6 +427,59 @@
           }
         },
         "error": "invalid"
+      },
+      {
+        "name": "an empty menu",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": []
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an empty section",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": []
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "children that is an empty list",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
       }
     ]
   },
@@ -609,6 +662,11 @@
           "items": []
         },
         "error": "unanswered"
+      },
+      {
+        "name": "an empty list",
+        "value": [],
+        "error": "unanswered"
       }
     ]
   },
@@ -778,6 +836,59 @@
                 ]
               }
             ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a title menu with a lazy item",
+        "value": {
+          "title": {
+            "text": "T",
+            "menu": [
+              {
+                "items": [
+                  {
+                    "id": "a",
+                    "label": "A",
+                    "children": "lazy"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an action button menu with a lazy item",
+        "value": {
+          "actionButtons": [
+            {
+              "id": "m",
+              "icon": "ellipsis",
+              "menu": [
+                {
+                  "items": [
+                    {
+                      "id": "a",
+                      "label": "A",
+                      "children": "lazy"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an empty title menu",
+        "value": {
+          "title": {
+            "text": "T",
+            "menu": []
           }
         },
         "error": "invalid"

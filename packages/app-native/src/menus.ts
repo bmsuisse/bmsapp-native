@@ -18,7 +18,6 @@ import {
   textLength,
   type Anchor,
 } from './internal.js'
-import { call } from './bridge.js'
 
 export type { Anchor }
 
@@ -81,6 +80,10 @@ function walkSections(sections: unknown, depth: number, where: string, walk: Wal
     walk.problems.push(`${where} has to be a list of sections.`)
     return
   }
+  if (sections.length === 0) {
+    walk.problems.push(`${where} is empty: a menu needs at least one section.`)
+    return
+  }
   sections.forEach((section: unknown, s) => {
     const at = `${where}[${s}]`
     if (!isRecord(section) || !Array.isArray(section.items)) {
@@ -90,6 +93,7 @@ function walkSections(sections: unknown, depth: number, where: string, walk: Wal
     if (section.title !== undefined && typeof section.title !== 'string') {
       walk.problems.push(`${at}.title has to be a string.`)
     }
+    if (section.items.length === 0) walk.problems.push(`${at} has no items.`)
     section.items.forEach((item: unknown, i) => walkItem(item, depth, `${at}.items[${i}]`, walk))
   })
 }
@@ -169,6 +173,8 @@ export type ShowMenuResult = { ok: true; id: string } | NativeFailure
 type MenuEntry = {
   loadChildren: NonNullable<ShowMenuOptions['loadChildren']>
   walk: Walk
+  /** The ids and the number of items that the answer for a lazy item added: asked again, it replaces them. */
+  loaded: Map<string, { ids: string[]; items: number }>
 }
 
 const openMenus = new Map<string, MenuEntry>()
@@ -193,12 +199,18 @@ async function expand(event: MenuExpandEvent): Promise<void> {
   }
   if (openMenus.get(event.menuId) !== entry) return // the menu is closed
   const depth = (entry.walk.lazy.get(itemId) ?? -1) + 1
+  // Check against a copy: an answer that is refused must leave no trace, and an item that is
+  // asked again (a retry) replaces what its earlier answer added.
+  const earlier = entry.loaded.get(itemId)
+  const ids = new Set(entry.walk.ids)
+  for (const id of earlier?.ids ?? []) ids.delete(id)
   const walk: Walk = {
     problems: [],
-    ids: entry.walk.ids,
-    items: entry.walk.items,
-    lazy: entry.walk.lazy,
+    ids,
+    items: entry.walk.items - (earlier?.items ?? 0),
+    lazy: new Map(entry.walk.lazy),
   }
+  const before = walk.items
   if (depth > MENU_LIMITS.depth)
     walk.problems.push('the lazy item is already at the deepest level.')
   else walkSections(sections, depth, 'sections', walk)
@@ -213,8 +225,12 @@ async function expand(event: MenuExpandEvent): Promise<void> {
       )
     return
   }
+  const added = [...ids].filter((id) => !entry.walk.ids.has(id) || earlier?.ids.includes(id))
+  entry.walk.ids = ids
   entry.walk.items = walk.items
-  await call('menuItems', { requestId, sections })
+  entry.walk.lazy = walk.lazy
+  entry.loaded.set(itemId, { ids: added, items: walk.items - before })
+  await callFeature('menus', 'menuItems', { requestId, sections })
 }
 
 function menuProblem(options: unknown): string | undefined {
@@ -279,7 +295,7 @@ export async function showMenu(options: ShowMenuOptions): Promise<ShowMenuResult
   if (openMenus.has(id)) {
     return { ok: false, error: 'busy', message: `A menu with the id "${id}" is already open.` }
   }
-  const entry: MenuEntry = { loadChildren, walk }
+  const entry: MenuEntry = { loadChildren, walk, loaded: new Map() }
   openMenus.set(id, entry)
   listenForExpand()
   try {
@@ -348,7 +364,7 @@ export type ShowAlertOptions = {
   textField?: AlertTextField
 }
 
-/** `text` only with `textField`. */
+/** `text` only with `textField`, then always present (`''` if the line is empty). */
 export type ShowAlertResult = { ok: true; id: string; text?: string } | NativeFailure
 
 function alertProblem(options: unknown): string | undefined {
@@ -369,6 +385,7 @@ function alertProblem(options: unknown): string | undefined {
     return `actions needs 1 to ${ALERT_LIMITS.actions} entries.`
   }
   let cancels = 0
+  const seen = new Set<string>()
   for (const [i, action] of actions.entries()) {
     if (!isRecord(action) || !nonEmptyString(action.id) || typeof action.label !== 'string') {
       return `actions[${i}] needs an id and a label.`
@@ -384,6 +401,8 @@ function alertProblem(options: unknown): string | undefined {
     if (action.preferred !== undefined && typeof action.preferred !== 'boolean') {
       return `actions[${i}].preferred has to be a boolean.`
     }
+    if (seen.has(action.id)) return `actions[${i}]: the id "${action.id}" is used twice.`
+    seen.add(action.id)
     if (action.style === 'cancel') cancels += 1
   }
   if (cancels > 1) return 'at most one action can be a cancel action.'
@@ -444,7 +463,9 @@ export async function showAlert(options: ShowAlertOptions): Promise<ShowAlertRes
   if (!answer.ok) return asFailure(answer)
   const { id, text } = answer as { id?: unknown; text?: unknown }
   if (typeof id !== 'string') return badAnswer()
-  return typeof text === 'string' ? { ok: true, id, text } : { ok: true, id }
+  // With a text field the text is always there (empty if the user left it empty).
+  if (options.textField) return { ok: true, id, text: typeof text === 'string' ? text : '' }
+  return { ok: true, id }
 }
 
 // --- showPicker ---------------------------------------------------------------
@@ -493,6 +514,13 @@ function pickerProblem(options: unknown): string | undefined {
       if (options[key] !== undefined && !isDate(options[key])) {
         return `${key} has to be a date as YYYY-MM-DD.`
       }
+    }
+    if (
+      typeof options.min === 'string' &&
+      typeof options.max === 'string' &&
+      options.min > options.max
+    ) {
+      return 'min is after max.'
     }
     return undefined
   }

@@ -667,11 +667,28 @@ def _check_content_limits(content: NativeContent) -> None:
         )
     _check_inline_images(blocks)
     _check_fields_blocks(blocks)
+    _check_unique_ids(blocks)
     if (chain := _chain_depth(content)) > MAX_CHAIN_DEPTH:
         raise SurfaceLimitError(
             f"{chain} chained surfaces after the first one, the app takes at most "
             f"{MAX_CHAIN_DEPTH} ({MAX_CHAIN_DEPTH + 1} screens in a flow in total)."
         )
+
+
+def _check_unique_ids(blocks: list[tuple[Any, int]]) -> None:
+    """Ids are unique per surface: among the blocks, among the list items, and among
+    the fields of the `fields` blocks."""
+    kinds: dict[str, list[str]] = {"block": [], "list item": [], "field": []}
+    for block, _ in blocks:
+        if block.id is not None:
+            kinds["block"].append(block.id)
+        if isinstance(block, ListBlock):
+            kinds["list item"].extend(item.id for item in block.items if item.id is not None)
+        if isinstance(block, FieldsBlock):
+            kinds["field"].extend(field.id for field in block.fields)
+    for kind, ids in kinds.items():
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"A {kind} `id` is used twice: ids are unique per surface.")
 
 
 def _check_inline_images(blocks: list[tuple[Any, int]]) -> None:

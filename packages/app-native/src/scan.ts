@@ -367,7 +367,7 @@ export async function scanDocument(options?: ScanDocumentOptions): Promise<ScanD
 
   const answer = await send('scanDocument', payload)
   if (!answer.ok) {
-    return answer.error === 'unknownAction' ? unavailable() : failureOf(answer)
+    return failureOf(answer)
   }
   if (!hasFeature('scanResult') && !Array.isArray((answer as { documents?: unknown }).documents)) {
     return { ok: true, documents: [], oldApp: true }

@@ -171,7 +171,7 @@ describe('scanDocument', () => {
   it('is unavailable outside the app and for unknownAction', async () => {
     expect(await scanDocument()).toEqual({ ok: false, error: 'unavailable' })
     installBridge({ call: answer({ ok: false, error: 'unknownAction' }) })
-    expect(await scanDocument()).toEqual({ ok: false, error: 'unavailable' })
+    expect(await scanDocument()).toEqual({ ok: false, error: 'unknownAction' })
   })
 
   it('never throws', async () => {
@@ -236,7 +236,7 @@ describe('pickFiles in the app', () => {
 
   it('treats unknownAction as unavailable and passes capability and cancelled', async () => {
     installBridge({ features: ['pickFiles'], call: answer({ ok: false, error: 'unknownAction' }) })
-    expect(await pickFiles({ sources: ['files'] })).toEqual({ ok: false, error: 'unavailable' })
+    expect(await pickFiles({ sources: ['files'] })).toEqual({ ok: false, error: 'unknownAction' })
     removeBridge()
     installBridge({ features: ['pickFiles'], call: answer({ ok: false, error: 'capability' }) })
     expect(await pickFiles({ sources: ['camera'] })).toEqual({ ok: false, error: 'capability' })
@@ -444,7 +444,7 @@ describe('onDocumentsReceived and consumeReceivedDocuments', () => {
       features: ['receiveDocuments'],
       call: answer({ ok: false, error: 'unknownAction' }),
     })
-    expect(await consumeReceivedDocuments()).toEqual({ ok: false, error: 'unavailable' })
+    expect(await consumeReceivedDocuments()).toEqual({ ok: false, error: 'unknownAction' })
   })
 
   it('consumeReceivedDocuments returns the queue, possibly empty', async () => {
@@ -507,7 +507,7 @@ describe('previewFile', () => {
       features: ['previewFile'],
       call: answer({ ok: false, error: 'unknownAction' }),
     })
-    expect(await previewFile({ url: '/a.pdf' })).toEqual({ ok: false, error: 'unavailable' })
+    expect(await previewFile({ url: '/a.pdf' })).toEqual({ ok: false, error: 'unknownAction' })
   })
 
   it('opens a new tab in the browser', async () => {

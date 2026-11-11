@@ -55,6 +55,14 @@
             }
           }
         }
+      },
+      {
+        "name": "min equal to max",
+        "value": {
+          "kind": "date",
+          "min": "2026-11-11",
+          "max": "2026-11-11"
+        }
       }
     ],
     "invalid": [
@@ -124,6 +132,15 @@
             "width": 3,
             "height": 4
           }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "min after max",
+        "value": {
+          "kind": "date",
+          "min": "2026-12-01",
+          "max": "2026-11-01"
         },
         "error": "invalid"
       }

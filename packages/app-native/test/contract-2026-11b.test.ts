@@ -243,9 +243,31 @@ describe('menu: lazy answers', () => {
 // --- C12 -------------------------------------------------------------------------
 
 runOptions('alert', alertJson.options as Section, 'showAlert', (o) => showAlert(o))
-runResults('alert', alertJson.results as Section, () =>
-  showAlert({ title: 'T', actions: [{ id: 'a', label: 'A' }] })
-)
+describe('alert: results', () => {
+  for (const c of (alertJson.results as Section).valid ?? []) {
+    it(`valid: ${c.name}`, async () => {
+      install({ call: answer(c.value) })
+      // With a text field the text is always there; the fixture's answers say whether there was one.
+      const withText = (c.value as { text?: string }).text !== undefined
+      expect(
+        await showAlert({
+          title: 'T',
+          actions: [{ id: 'a', label: 'A' }],
+          ...(withText && { textField: {} }),
+        })
+      ).toEqual(c.value)
+    })
+  }
+  for (const c of (alertJson.results as Section).invalid ?? []) {
+    it(`invalid: ${c.name}`, async () => {
+      install({ call: answer(c.value) })
+      expect(await showAlert({ title: 'T', actions: [{ id: 'a', label: 'A' }] })).toMatchObject({
+        ok: false,
+        error: c.error,
+      })
+    })
+  }
+})
 
 // --- C13 -------------------------------------------------------------------------
 

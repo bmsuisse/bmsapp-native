@@ -22,8 +22,9 @@ export function invalid(kind: string, message: string): NativeFailure {
 
 /**
  * `call`, but only if the app lists the feature: an app without it answers
- * `unavailable` without being asked, and so does an app that still answers
- * `unknownAction`. Never throws.
+ * `unavailable` without being asked. An app that lists it and still answers
+ * `unknownAction` is passed through with that code (`isUnavailable` treats both alike).
+ * Never throws.
  */
 export async function callFeature<T extends object = object>(
   feature: Feature,
@@ -31,9 +32,7 @@ export async function callFeature<T extends object = object>(
   payload: Message = {}
 ): Promise<NativeResult<T> | NativeFailure> {
   if (!hasFeature(feature)) return unavailable()
-  const result = await call<T>(action, payload)
-  if (!result.ok && result.error === 'unknownAction') return unavailable()
-  return result
+  return call<T>(action, payload)
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

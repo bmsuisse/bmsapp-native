@@ -78,7 +78,7 @@ describe('dictate', () => {
     expect(bridge.call).not.toHaveBeenCalled()
     removeBridge()
     installBridge({ features: ['dictate'], call: answer({ ok: false, error: 'unknownAction' }) })
-    expect(await dictate()).toEqual({ ok: false, error: 'unavailable' })
+    expect(await dictate()).toEqual({ ok: false, error: 'unknownAction' })
   })
 
   it('reports an answer without text as failed', async () => {
@@ -109,7 +109,7 @@ describe('getLayout and keyboardHeight', () => {
     expect(await getLayout()).toEqual({ ok: false, error: 'unavailable' })
     removeBridge()
     installBridge({ features: ['layout'], call: answer({ ok: false, error: 'unknownAction' }) })
-    expect(await getLayout()).toEqual({ ok: false, error: 'unavailable' })
+    expect(await getLayout()).toEqual({ ok: false, error: 'unknownAction' })
   })
 
   it('reports an incomplete answer as failed', async () => {
@@ -325,6 +325,6 @@ describe('getAccessToken with a resource', () => {
       features: ['tokenResources'],
       call: answer({ ok: false, error: 'unknownAction' }),
     })
-    expect(await getAccessToken({ resource })).toEqual({ ok: false, error: 'unavailable' })
+    expect(await getAccessToken({ resource })).toEqual({ ok: false, error: 'unknownAction' })
   })
 })
