@@ -59,13 +59,17 @@ import json
 import re
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import jwt
+import rules
 from bmsdna.app_native import (
+    ActionField,
     ActionOption,
+    ActionPage,
     EntraTokenError,
     EntraTokenVerifier,
     EntraUser,
@@ -74,6 +78,7 @@ from bmsdna.app_native import (
     NativeContent,
     NativeFileRef,
     NativeForm,
+    NativeMenu,
     ReceivedDocument,
     SignedSessionCookie,
     SurfaceLimitError,
@@ -369,8 +374,69 @@ def _access_token(body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "token": token, "expiresAt": exp, "resource": resource}
 
 
-def _contract_answer(action: str, body: dict[str, Any], host: str | None) -> dict[str, Any] | None:
-    """The actions of contract 2026-11; `None` for any other action."""
+def _refuse(problem: str | None) -> dict[str, Any]:
+    return {"ok": True} if problem is None else _bad(problem)
+
+
+def _show_menu(body: dict[str, Any]) -> dict[str, Any]:
+    problem = rules.menu_problem(body)
+    if problem is None:
+        menu = NativeMenu.model_validate(
+            {k: v for k, v in body.items() if k not in ("anchor", "action")}
+        )
+        STATE["menu"] = rules.lazy_index(menu)
+    return _refuse(problem)
+
+
+def _surface_content(body: dict[str, Any]) -> str | None:
+    """`updateSurface`: the new definition parts are checked like `showForm`/`showContent`."""
+    if (problem := rules.update_surface_problem(body)) is not None:
+        return problem
+    try:
+        if body.get("blocks"):
+            NativeContent.model_validate({"blocks": body["blocks"], "actions": body.get("actions")})
+        for field in body.get("fields") or []:
+            ActionField.model_validate(field)
+        for page in body.get("pages") or []:
+            ActionPage.model_validate(page)
+    except ValidationError as error:
+        return _refusal(error)[1]
+    return None
+
+
+def _contract_b_answer(
+    action: str, body: dict[str, Any], host: str | None, *, is_post: bool
+) -> dict[str, Any] | None:
+    """The actions of contract 2026-11b; `None` for any other action."""
+    if action == "toast":
+        # `post("toast")` is the old fire-and-forget form and takes whatever it took.
+        return {"ok": True} if is_post else _refuse(rules.toast_problem(body))
+    if action == "showMenu":
+        return _show_menu(body)
+    checks: dict[str, Callable[[], str | None]] = {
+        "menuItems": lambda: rules.menu_items_problem(
+            body, STATE.get("menu"), STATE.setdefault("menu_requests", {})
+        ),
+        "showAlert": lambda: rules.alert_problem(body),
+        "updateSurface": lambda: _surface_content(body),
+        "surfaceSearchResult": lambda: rules.search_answer_problem(body),
+        "setKeyboardToolbar": lambda: rules.keyboard_toolbar_problem(body),
+        "setKeyCommands": lambda: rules.key_commands_problem(body),
+        "showDocument": lambda: rules.document_problem(body, host, update=False),
+        "updateDocument": lambda: rules.document_problem(body, host, update=True),
+        "showPicker": lambda: rules.picker_problem(body),
+        "setChrome": lambda: rules.chrome_problem(body),
+    }
+    check = checks.get(action)
+    return None if check is None else _refuse(check())
+
+
+def _contract_answer(
+    action: str, body: dict[str, Any], host: str | None, *, is_post: bool = False
+) -> dict[str, Any] | None:
+    """The actions of contracts 2026-11 and 2026-11b; `None` for any other action."""
+    if (answer := _contract_b_answer(action, body, host, is_post=is_post)) is not None:
+        return answer
     if action == "scanDocument":
         return _scan_document(body)
     if action == "pickFiles":
@@ -388,8 +454,10 @@ def _contract_answer(action: str, body: dict[str, Any], host: str | None) -> dic
     return None
 
 
-def _answer(action: str, body: dict[str, Any], host: str | None = None) -> dict[str, Any]:
-    answer = _contract_answer(action, body, host)
+def _answer(
+    action: str, body: dict[str, Any], host: str | None = None, *, is_post: bool = False
+) -> dict[str, Any]:
+    answer = _contract_answer(action, body, host, is_post=is_post)
     if answer is not None:
         return answer
     if action in ("scanText", "scanBarcode"):
@@ -490,6 +558,8 @@ def _reset_surface_backend() -> None:
     STATE["upload_failures"] = {}
     STATE["resources"] = [RESOURCE]
     STATE["consented"] = []
+    STATE.pop("menu", None)
+    STATE.pop("menu_requests", None)
     _RESULTS._entries.clear()
     for entries in BACKEND_LOG.values():
         entries.clear()
@@ -505,6 +575,55 @@ class NewCustomer(BaseModel):
     name: str
     email: str | None = None
     card: list[NativeFileRef] = []
+
+
+def _test_endpoints(router: APIRouter) -> None:
+    """Endpoints that tests use to set up the emulated app and backend (`/test/...`), and
+    the files and the second API that the app downloads from and asks for tokens for."""
+
+    @router.post("/test/document-reference")
+    async def set_document_reference(request: Request) -> None:
+        """`"id"`: the document router answers with an `id`. `"none"`: it answers
+        `{"ok": true}` only and the app hands out the `upload_id`."""
+        STATE["reference"] = (await request.json())["mode"]
+
+    @router.post("/test/document-backend")
+    async def set_document_backend(request: Request) -> None:
+        """`{"dedupe": bool, "failures": {filename: count}}`: whether the document
+        router remembers answers per `upload_id`, and which files fail with a 503
+        that many times first (the app then retries once)."""
+        body = await request.json()
+        STATE["dedupe"] = bool(body.get("dedupe", False))
+        STATE["upload_failures"] = dict(body.get("failures", {}))
+
+    @router.post("/test/menu-expand")
+    async def menu_expand(request: Request) -> None:
+        """The emulated app asks the page for the children of a lazy item: remember which
+        item the `requestId` belongs to, to check the answer (`menuItems`) against it."""
+        body = await request.json()
+        STATE.setdefault("menu_requests", {})[body["requestId"]] = body["itemId"]
+
+    @router.post("/test/token-resources")
+    async def set_token_resources(request: Request) -> None:
+        """`{"resources": [...], "consented": [...]}`: what is configured for this web
+        app in the emulated app, and what the user has already consented to."""
+        body = await request.json()
+        STATE["resources"] = list(body.get("resources", [RESOURCE]))
+        STATE["consented"] = list(body.get("consented", []))
+
+    @router.get("/files/{name}")
+    async def files(name: str) -> Response:
+        """Files that `previewFile` downloads: `missing.pdf` does not exist."""
+        if name.startswith("missing"):
+            raise HTTPException(status_code=404, detail="Not found")
+        if name.endswith(".txt"):
+            return Response("e2e", media_type="text/plain")
+        return Response(b"%PDF-1.4 e2e", media_type="application/pdf")
+
+    @router.get("/api/other-api/me")
+    async def other_api_me(user: EntraUser = Depends(OTHER_AUTH)) -> dict[str, str | None]:
+        """Another API of the same tenant: it takes tokens for `RESOURCE` only."""
+        return {"email": user.email}
 
 
 def _surface_backend() -> APIRouter:
@@ -551,42 +670,7 @@ def _surface_backend() -> APIRouter:
     async def backend_log() -> dict[str, list[dict[str, Any]]]:
         return BACKEND_LOG
 
-    @router.post("/test/document-reference")
-    async def set_document_reference(request: Request) -> None:
-        """`"id"`: the document router answers with an `id`. `"none"`: it answers
-        `{"ok": true}` only and the app hands out the `upload_id`."""
-        STATE["reference"] = (await request.json())["mode"]
-
-    @router.post("/test/document-backend")
-    async def set_document_backend(request: Request) -> None:
-        """`{"dedupe": bool, "failures": {filename: count}}`: whether the document
-        router remembers answers per `upload_id`, and which files fail with a 503
-        that many times first (the app then retries once)."""
-        body = await request.json()
-        STATE["dedupe"] = bool(body.get("dedupe", False))
-        STATE["upload_failures"] = dict(body.get("failures", {}))
-
-    @router.post("/test/token-resources")
-    async def set_token_resources(request: Request) -> None:
-        """`{"resources": [...], "consented": [...]}`: what is configured for this web
-        app in the emulated app, and what the user has already consented to."""
-        body = await request.json()
-        STATE["resources"] = list(body.get("resources", [RESOURCE]))
-        STATE["consented"] = list(body.get("consented", []))
-
-    @router.get("/files/{name}")
-    async def files(name: str) -> Response:
-        """Files that `previewFile` downloads: `missing.pdf` does not exist."""
-        if name.startswith("missing"):
-            raise HTTPException(status_code=404, detail="Not found")
-        if name.endswith(".txt"):
-            return Response("e2e", media_type="text/plain")
-        return Response(b"%PDF-1.4 e2e", media_type="application/pdf")
-
-    @router.get("/api/other-api/me")
-    async def other_api_me(user: EntraUser = Depends(OTHER_AUTH)) -> dict[str, str | None]:
-        """Another API of the same tenant: it takes tokens for `RESOURCE` only."""
-        return {"email": user.email}
+    _test_endpoints(router)
 
     return router
 
@@ -629,7 +713,12 @@ def create_app() -> FastAPI:
     async def native(action: str, request: Request) -> dict[str, Any]:
         body = await request.json()
         LOG.append({**body, "action": action})
-        return _answer(action, body, request.headers.get("host"))
+        is_post = request.query_params.get("post") == "1"
+        # A payload key `action` (the button of a toast) travels as "@action".
+        payload = {k: v for k, v in body.items() if k not in ("@action", "action")}
+        if "@action" in body:
+            payload["action"] = body["@action"]
+        return _answer(action, payload, request.headers.get("host"), is_post=is_post)
 
     @app.get("/native-log")
     async def native_log() -> list[dict[str, Any]]:

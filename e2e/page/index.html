@@ -8,8 +8,8 @@
       // any page script — here forwarding to the test harness.
       if (!new URLSearchParams(location.search).has('browser')) {
         const params = new URLSearchParams(location.search)
-        const send = (message) =>
-          fetch('/native/' + message.action, {
+        const send = (message, isPost = false) =>
+          fetch('/native/' + message.action + (isPost ? '?post=1' : ''), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(message),
@@ -46,6 +46,20 @@
           'backInterception',
           'previewFile',
           'tokenResources',
+          'menus',
+          'titleMenu',
+          'alerts',
+          'toastActions',
+          'liveSurfaces',
+          'pageSearch',
+          'navSearch',
+          'keyboardToolbar',
+          'segments',
+          'sidebar',
+          'documentViewer',
+          'undoGestures',
+          'pickers',
+          'keyCommands',
         ]
         const features = params.has('oldApp')
           ? undefined
@@ -61,8 +75,40 @@
           setBackInterception: 'backInterception',
           backResult: 'backInterception',
           previewFile: 'previewFile',
+          showMenu: 'menus',
+          menuItems: 'menus',
+          showAlert: 'alerts',
+          updateSurface: 'liveSurfaces',
+          surfaceSearchResult: 'pageSearch',
+          setKeyboardToolbar: 'keyboardToolbar',
+          showDocument: 'documentViewer',
+          updateDocument: 'documentViewer',
+          showPicker: 'pickers',
+          setKeyCommands: 'keyCommands',
         }
+        // Everything of 2026-11b needs `customChrome`; `updateSurface` also a surface capability.
+        const NEEDS_CHROME = new Set([
+          'showMenu',
+          'menuItems',
+          'showAlert',
+          'updateSurface',
+          'surfaceSearchResult',
+          'setKeyboardToolbar',
+          'showDocument',
+          'updateDocument',
+          'showPicker',
+          'setKeyCommands',
+        ])
         const has = (feature) => !!features && features.includes(feature)
+
+        // `BMSNative.call(action, payload)`: the payload of `toast` has a key `action` of its own
+        // (the button of the toast), which would overwrite the name of the action in a flat
+        // message. It travels as "@action" to the harness, which puts it back.
+        const sendCall = (action, payload) => {
+          const body = { ...(payload || {}), action }
+          if (payload && Object.hasOwn(payload, 'action')) body['@action'] = payload.action
+          return send(body)
+        }
 
         // --- Native surfaces -------------------------------------------------
         // A stand-in for the app's native sheets. Tests push what "the user"
@@ -260,6 +306,7 @@
           if (behavior.error) return failure(behavior.error, behavior.message)
           const id = def.id || 'surface-' + ++surfaces.counter
           surfaces.open = id
+          surfaces.def = structuredClone(def)
           try {
             if (behavior.hold) {
               return await new Promise((resolve) => (surfaces.held = resolve))
@@ -274,6 +321,7 @@
               : await tapAction(id, def, behavior)
           } finally {
             surfaces.open = null
+            surfaces.def = null
             surfaces.waiting = null
             surfaces.held = null
           }
@@ -562,11 +610,592 @@
           return { ok: true }
         }
 
+        // --- 2026-11b -----------------------------------------------------------
+        // Menus, alerts, toasts, live surfaces, the parts of setChrome, the keyboard
+        // toolbar, the document viewer, pickers and key commands. Like the rest of this
+        // page: tests script what "the user" does (`script`) or play the user with the
+        // methods of `window.__menu`, `__alert`, `__toast`, `__chrome`, `__kb`, `__viewer`,
+        // `__picker`, `__keys` and `__surfaces`.
+        let counter2 = 0
+        const nextId = (prefix) => prefix + '-' + ++counter2
+
+        // Menus. A step is { select: 'itemId' } | { dismiss: true } | { hold: true },
+        // optionally with { expand: ['lazyItemId', …] } first (the user opens lazy items).
+        // `lazyTimeout` is the 5 seconds the page has for the answer to a lazy item.
+        const menu = {
+          script: [],
+          shown: [],
+          open: null,
+          held: null,
+          lazyTimeout: 5000,
+          pending: new Map(),
+          late: [],
+        }
+        window.__menu = menu
+
+        const rowsOf = (sections) =>
+          (sections || []).flatMap((s) => s.items.map((i) => ({ id: i.id, label: i.label })))
+
+        function findMenuItem(sections, id) {
+          for (const section of sections || []) {
+            for (const item of section.items) {
+              if (item.id === id) return item
+              if (Array.isArray(item.children)) {
+                const found = findMenuItem(item.children, id)
+                if (found) return found
+              }
+            }
+          }
+          return null
+        }
+
+        async function expandLazy(state, itemId) {
+          const item = findMenuItem(state.sections, itemId)
+          if (!item || item.children !== 'lazy') return
+          const requestId = nextId('req')
+          const record = {
+            itemId,
+            requestId,
+            rows: [{ id: null, label: 'loading' }],
+            state: 'loading',
+          }
+          state.expansions[itemId] = record
+          if (typeof window.onNativeMenuExpand !== 'function') {
+            record.state = 'failed'
+            record.rows = [{ id: null, label: item.lazyFailedLabel ?? '–', disabled: true }]
+            return
+          }
+          const answered = new Promise((resolve) => menu.pending.set(requestId, resolve))
+          const timeout = new Promise((resolve) =>
+            setTimeout(() => resolve(null), menu.lazyTimeout)
+          )
+          await fetch('/test/menu-expand', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId, itemId }),
+          })
+          window.onNativeMenuExpand({ menuId: state.id, itemId, requestId })
+          const sections = await Promise.race([answered, timeout])
+          menu.pending.delete(requestId)
+          if (sections) {
+            item.children = sections
+            record.state = 'loaded'
+            record.rows = rowsOf(sections)
+          } else {
+            record.state = 'failed'
+            record.rows = [{ id: null, label: item.lazyFailedLabel ?? '–', disabled: true }]
+          }
+        }
+
+        async function showMenuCall(payload) {
+          if (menu.open) return failure('busy', 'A menu is already open.')
+          const step = menu.script.shift() || { dismiss: true }
+          const state = {
+            id: payload.id || nextId('menu'),
+            anchor: payload.anchor,
+            preview: payload.preview,
+            sections: structuredClone(payload.sections),
+            expansions: {},
+          }
+          menu.open = state
+          menu.shown.push(state)
+          try {
+            for (const itemId of step.expand || []) await expandLazy(state, itemId)
+            if (step.hold) await new Promise((resolve) => (menu.held = resolve))
+            if (step.select) {
+              const item = findMenuItem(state.sections, step.select)
+              if (!item || item.disabled || item.children) return failure('cancelled')
+              return { ok: true, id: item.id }
+            }
+            return failure('cancelled')
+          } finally {
+            menu.open = null
+            menu.held = null
+          }
+        }
+
+        function menuItemsCall(payload) {
+          const resolve = menu.pending.get(payload.requestId)
+          if (resolve) resolve(payload.sections)
+          else menu.late.push(payload.requestId)
+          return { ok: true }
+        }
+
+        // Alerts and action sheets. A step is { tap: 'actionId', text? } | { outside: true }
+        // | { error }.
+        const alertApp = { script: [], shown: [] }
+        window.__alert = alertApp
+
+        async function showAlertCall(payload) {
+          const step = alertApp.script.shift() || { outside: true }
+          const style = payload.style || 'alert'
+          alertApp.shown.push({
+            ...payload,
+            style,
+            // iPad: an action sheet without an anchor is centred.
+            centred: style === 'actionSheet' && !payload.anchor,
+          })
+          if (step.error) return failure(step.error)
+          const cancel = payload.actions.find((a) => a.style === 'cancel')
+          if (step.outside) {
+            return style === 'actionSheet' && cancel
+              ? { ok: true, id: cancel.id }
+              : failure('cancelled')
+          }
+          const action = payload.actions.find((a) => a.id === step.tap)
+          if (!action) return failure('invalid', 'No such action.')
+          if (!payload.textField) return { ok: true, id: action.id }
+          let text = step.text ?? payload.textField.value ?? ''
+          if (payload.textField.maxLength) text = text.slice(0, payload.textField.maxLength)
+          return { ok: true, id: action.id, text }
+        }
+
+        // Toasts with a response: one visible at a time, a new one replaces it.
+        const toasts = { visible: null, history: [] }
+        window.__toast = {
+          get visible() {
+            return toasts.visible
+          },
+          history: toasts.history,
+          tap() {
+            const toast = toasts.visible
+            if (!toast || !toast.action) return false
+            toasts.visible = null // the toast closes with the tap
+            if (typeof window.onNativeToastAction === 'function') {
+              window.onNativeToastAction({ toastId: toast.toastId, id: toast.action.id })
+            }
+            return true
+          },
+        }
+
+        function toastCall(payload) {
+          const toastId = nextId('toast')
+          const toast = {
+            toastId,
+            message: payload.message,
+            style: payload.style || 'info',
+            duration: payload.duration ?? (payload.action ? 6 : 2.5),
+            action: payload.action,
+          }
+          toasts.visible = toast
+          toasts.history.push(toast)
+          return { ok: true, toastId }
+        }
+
+        // Pickers. A step is { value } | { dismiss: true } | { error }.
+        const picker = { script: [], shown: [] }
+        window.__picker = picker
+
+        function showPickerCall(payload) {
+          const step = picker.script.shift() || { dismiss: true }
+          picker.shown.push({ ...payload, popover: !!payload.anchor })
+          if (step.error) return failure(step.error)
+          if (step.dismiss) return failure('cancelled')
+          if (payload.kind === 'option' && !payload.options.some((o) => o.value === step.value)) {
+            return failure('invalid', 'Not one of the options.')
+          }
+          return { ok: true, value: step.value }
+        }
+
+        // Chrome: title, action button menus, search, segments, sidebar, undo.
+        const chromeState = {
+          actionButtons: [],
+          title: null,
+          search: null,
+          segments: null,
+          sidebar: null,
+          undo: null,
+          sidebarSelected: null,
+        }
+        const chromeApp = {
+          state: chromeState,
+          searchDebounce: 20,
+          get sizeClass() {
+            return window.__layout.state.sizeClass
+          },
+          // What the user sees of it.
+          navTitle: () =>
+            chromeState.title ? { ...chromeState.title, hasMenu: !!chromeState.title.menu } : null,
+          searchField: () => chromeState.search,
+          segments: () => chromeState.segments,
+          undoState: () => chromeState.undo,
+          sidebarVisible: () =>
+            !!chromeState.sidebar && window.__layout.state.sizeClass === 'regular',
+          sidebar: () => (chromeApp.sidebarVisible() ? chromeState.sidebar : null),
+          // The user taps an action button: a pull-down menu, or `actionButtonTap`.
+          tapActionButton(buttonId) {
+            const button = chromeState.actionButtons.find((b) => b.id === buttonId)
+            if (!button) return 'none'
+            if (button.menu && has('menus')) return 'menu'
+            if (typeof window.onNativeActionButtonTap === 'function')
+              window.onNativeActionButtonTap(buttonId)
+            return 'tap'
+          },
+          selectActionButtonMenu(buttonId, id) {
+            const button = chromeState.actionButtons.find((b) => b.id === buttonId)
+            if (!button || !button.menu || !has('menus') || !findMenuItem(button.menu, id))
+              return false
+            window.onNativeActionButtonMenuSelect?.({ buttonId, id })
+            return true
+          },
+          selectTitleMenu(id) {
+            const title = chromeState.title
+            if (!title || !title.menu || !findMenuItem(title.menu, id)) return false
+            window.onNativeTitleMenuSelect?.({ id })
+            return true
+          },
+          // The search field. `typeSearch` is debounced like the app does (`searchDebounce`).
+          typeSearch(query) {
+            const search = chromeState.search
+            if (!search) return Promise.resolve(false)
+            search.value = query
+            return new Promise((resolve) =>
+              setTimeout(() => {
+                window.onNativeSearch?.({
+                  id: search.id,
+                  query,
+                  scope: search.scope ?? null,
+                  submitted: false,
+                  source: 'typing',
+                })
+                resolve(true)
+              }, chromeApp.searchDebounce)
+            )
+          },
+          submitSearch(query) {
+            const search = chromeState.search
+            if (!search) return false
+            search.value = query
+            window.onNativeSearch?.({
+              id: search.id,
+              query,
+              scope: search.scope ?? null,
+              submitted: true,
+              source: 'submit',
+            })
+            return true
+          },
+          scanSearch(code) {
+            const search = chromeState.search
+            if (!search || !search.barcode || !capabilities.includes('camera')) return false
+            search.value = code
+            window.onNativeSearch?.({
+              id: search.id,
+              query: code,
+              scope: search.scope ?? null,
+              submitted: true,
+              source: 'barcode',
+            })
+            return true
+          },
+          cancelSearch() {
+            const search = chromeState.search
+            if (!search) return false
+            search.value = ''
+            window.onNativeSearchCancel?.({ id: search.id })
+            return true
+          },
+          selectSegment(item) {
+            const segments = chromeState.segments
+            if (!segments || !segments.items.some((i) => i.id === item)) return false
+            segments.selected = item
+            window.onNativeSegmentSelect?.({ id: segments.id, item })
+            return true
+          },
+          selectSidebar(id) {
+            if (!chromeApp.sidebarVisible()) return false
+            chromeState.sidebarSelected = id
+            window.onNativeSidebarSelect?.({ id })
+            return true
+          },
+          swipeSidebar(itemId, id) {
+            if (!chromeApp.sidebarVisible()) return false
+            window.onNativeSidebarAction?.({ itemId, id })
+            return true
+          },
+          searchSidebar(query) {
+            if (!chromeApp.sidebarVisible() || !chromeState.sidebar.search) return false
+            window.onNativeSidebarSearch?.({ query })
+            return true
+          },
+          // Shake, the iPad three-finger gestures and the edit menu.
+          undo(action = 'undo') {
+            const undo = chromeState.undo
+            if (!undo || !(action === 'undo' ? undo.canUndo : undo.canRedo)) return false
+            window.onNativeUndo?.({ action })
+            return true
+          },
+        }
+        window.__chrome = chromeApp
+
+        // What `setChrome` changes. The parts of 2026-11b are replaced as a whole, and an
+        // app without the feature ignores them. An invalid part is dropped.
+        function applyChrome(message) {
+          const additions = [
+            ['title', 'titleMenu'],
+            ['search', 'navSearch'],
+            ['segments', 'segments'],
+            ['sidebar', 'sidebar'],
+            ['undo', 'undoGestures'],
+          ]
+          chromeState.actionButtons = structuredClone(message.actionButtons || [])
+          for (const [key, feature] of additions) {
+            chromeState[key] = has(feature) && message[key] ? structuredClone(message[key]) : null
+          }
+          if (chromeState.sidebar) {
+            // Sending the sidebar again keeps the selection.
+            const ids = chromeState.sidebar.sections.flatMap((s) => s.items.map((i) => i.id))
+            const marked = chromeState.sidebar.sections
+              .flatMap((s) => s.items)
+              .find((i) => i.selected)
+            if (marked) chromeState.sidebarSelected = marked.id
+            else if (!ids.includes(chromeState.sidebarSelected)) chromeState.sidebarSelected = null
+          } else {
+            chromeState.sidebarSelected = null
+          }
+        }
+
+        // The keyboard toolbar: shown while a field has focus and no hardware keyboard.
+        const kb = { toolbar: null, focus: false, hardware: false }
+        window.__kb = {
+          get toolbar() {
+            return kb.toolbar
+          },
+          visible: () => !!kb.toolbar && kb.focus && !kb.hardware,
+          focusField() {
+            kb.focus = true
+          },
+          blur() {
+            kb.focus = false
+          },
+          setHardware(on) {
+            kb.hardware = on
+          },
+          get focus() {
+            return kb.focus
+          },
+          tap(id) {
+            if (!window.__kb.visible() || !kb.toolbar.items.some((i) => i.id === id)) return false
+            window.onNativeKeyboardToolbarTap?.({ id }) // the focus stays
+            return true
+          },
+          tapDone() {
+            if (!window.__kb.visible() || !kb.toolbar.done) return false
+            kb.focus = false
+            return true
+          },
+        }
+
+        // Key commands (hardware keyboard only). `press` says what the app does with a key.
+        const keys = { commands: [], textFocus: false, hardware: true }
+        window.__keys = {
+          get commands() {
+            return keys.commands
+          },
+          set textFocus(on) {
+            keys.textFocus = on
+          },
+          set hardware(on) {
+            keys.hardware = on
+          },
+          press({ input, modifiers = [] }) {
+            if (!keys.hardware) return 'dom'
+            const wanted = [...modifiers].sort().join()
+            const command = keys.commands.find(
+              (c) =>
+                c.input.toLowerCase() === input.toLowerCase() &&
+                [...c.modifiers].sort().join() === wanted
+            )
+            if (!command) return 'dom' // not registered: the DOM keydown goes through
+            if (command.modifiers.length === 0 && keys.textFocus) return 'dom'
+            window.onNativeKeyCommand?.({ id: command.id })
+            return 'consumed'
+          },
+        }
+
+        // The native document viewer. `tap`, `scrollToPage` and `close` are the user.
+        const viewer = { open: null, resolve: null }
+        window.__viewer = {
+          get state() {
+            return viewer.open
+          },
+          tap(highlightId, page = 1, x = 0.5, y = 0.5) {
+            if (!viewer.open) return false
+            window.onNativeDocumentTap?.({ id: viewer.open.id, highlightId, page, x, y })
+            return true
+          },
+          scrollToPage(page) {
+            if (!viewer.open) return false
+            viewer.open.page = page
+            window.onNativeDocumentPage?.({ id: viewer.open.id, page })
+            return true
+          },
+          close() {
+            if (!viewer.open) return false
+            viewer.resolve({ ok: true })
+            return true
+          },
+        }
+
+        async function showDocumentCall(payload) {
+          const response = await fetch(payload.url, { credentials: 'include' })
+          if (response.status >= 400) return { ok: false, error: 'failed', status: response.status }
+          const id = payload.id || nextId('doc')
+          viewer.open = {
+            id,
+            url: payload.url,
+            title: payload.title,
+            page: payload.page || 1,
+            highlights: structuredClone(payload.highlights || []),
+            selected: payload.selected ?? null,
+          }
+          try {
+            return await new Promise((resolve) => (viewer.resolve = resolve))
+          } finally {
+            viewer.open = null
+          }
+        }
+
+        function updateDocumentCall(payload) {
+          const open = viewer.open
+          if (!open || open.id !== payload.id) return failure('notFound')
+          if (payload.highlights) open.highlights = structuredClone(payload.highlights)
+          if (payload.selected !== undefined) {
+            open.selected = payload.selected
+            const target = open.highlights.find((h) => h.id === payload.selected)
+            if (target) open.page = target.page // the viewer scrolls to it
+          }
+          if (payload.page) open.page = payload.page
+          return { ok: true }
+        }
+
+        // Live surfaces: `window.__surfaces.type(fieldId, value)` is the user typing into a
+        // field, `search(fieldId, query)` typing into a search field with source "page".
+        function surfaceFields(def) {
+          const out = [...(def.fields || []), ...(def.pages || []).flatMap((p) => p.fields)]
+          const visit = (blocks) =>
+            (blocks || []).forEach((b) => {
+              if (b.type === 'fields') out.push(...b.fields)
+              if (b.blocks) visit(b.blocks)
+            })
+          visit(def.blocks)
+          return out
+        }
+        const surfaceIds = (def) => {
+          const ids = new Set(surfaceFields(def).map((f) => f.id))
+          const visit = (blocks) =>
+            (blocks || []).forEach((b) => {
+              if (b.id) ids.add(b.id)
+              if (b.type === 'list') b.items.forEach((i) => i.id && ids.add(i.id))
+              if (b.blocks) visit(b.blocks)
+            })
+          visit(def.blocks)
+          return ids
+        }
+        surfaces.changes = []
+        surfaces.entered = {}
+        surfaces.focus = null
+        surfaces.found = {}
+        surfaces.stale = []
+        surfaces.searchTimeout = 10000
+        surfaces.updates = []
+        surfaces.type = (fieldId, value) => {
+          const field = surfaceFields(surfaces.def || {}).find((f) => f.id === fieldId)
+          if (!field) return false
+          surfaces.entered[fieldId] = value
+          surfaces.focus = fieldId
+          if (!field.live || typeof window.onNativeSurfaceChange !== 'function') return false
+          surfaces.changes.push({ fieldId, value })
+          window.onNativeSurfaceChange({ id: surfaces.open, fieldId, value })
+          return true
+        }
+        surfaces.search = (fieldId, query) => {
+          const field = surfaceFields(surfaces.def || {}).find((f) => f.id === fieldId)
+          if (!field || field.type !== 'search' || field.source !== 'page') return null
+          if (query.length < (field.minQueryLength ?? 2)) return null
+          if (typeof window.onNativeSurfaceSearch !== 'function') return null
+          const requestId = nextId('search')
+          const record = { requestId, options: null, timedOut: false }
+          surfaces.found[fieldId] = record
+          setTimeout(() => {
+            if (record.options === null) record.timedOut = true
+          }, surfaces.searchTimeout)
+          window.onNativeSurfaceSearch({ id: surfaces.open, fieldId, query, requestId })
+          return requestId
+        }
+
+        function surfaceSearchResultCall(payload) {
+          // Only the newest request of a field is shown; older answers are ignored.
+          const record = Object.values(surfaces.found).find(
+            (r) => r.requestId === payload.requestId
+          )
+          const newest = Object.values(surfaces.found).some(
+            (r) => r.requestId === payload.requestId
+          )
+          if (newest && !record.timedOut) record.options = payload.options
+          else surfaces.stale.push(payload.requestId)
+          return { ok: true }
+        }
+
+        function updateSurfaceCall(payload) {
+          if (!surfaces.open || surfaces.open !== payload.id) return failure('notFound')
+          const before = surfaceIds(surfaces.def)
+          for (const key of [
+            'title',
+            'subtitle',
+            'blocks',
+            'actions',
+            'values',
+            'fields',
+            'pages',
+          ]) {
+            if (payload[key] !== undefined) surfaces.def[key] = structuredClone(payload[key])
+          }
+          const after = surfaceIds(surfaces.def)
+          // Where ids persist, focus, entered values and scroll position are kept.
+          const kept = [...after].filter((id) => before.has(id))
+          for (const id of Object.keys(surfaces.entered))
+            if (!after.has(id)) delete surfaces.entered[id]
+          if (!after.has(surfaces.focus)) surfaces.focus = null
+          surfaces.updates.push({
+            keys: Object.keys(payload).filter((k) => k !== 'id'),
+            kept,
+            scrollKept: kept.length > 0,
+          })
+          return { ok: true }
+        }
+
+        function setKeyboardToolbarCall(payload) {
+          kb.toolbar = payload.items.length ? { items: payload.items, done: !!payload.done } : null
+          return { ok: true }
+        }
+
+        function setKeyCommandsCall(payload) {
+          keys.commands = payload.commands
+          return { ok: true }
+        }
+
         async function call(action, payload) {
           // An app without the feature does not know the action.
           if (FEATURE_OF[action] && !has(FEATURE_OF[action])) {
-            await send({ ...(payload || {}), action })
+            await sendCall(action, payload)
             return failure('unknownAction')
+          }
+          if (NEEDS_CHROME.has(action) && !capabilities.includes('customChrome')) {
+            await sendCall(action, payload)
+            return failure('capability', 'No customChrome capability.')
+          }
+          if (
+            action === 'updateSurface' &&
+            !capabilities.includes('nativeForms') &&
+            !capabilities.includes('nativeContent')
+          ) {
+            return failure('capability', 'No surface capability.')
+          }
+          // `toast` with a response: an app without `toastActions` just accepts it.
+          if (action === 'toast' && !has('toastActions')) {
+            await sendCall(action, payload)
+            return { ok: true }
           }
           // An app without `tokenResources` ignores the resource: the normal token.
           if (action === 'getAccessToken') {
@@ -579,7 +1208,7 @@
           }
           // Every message goes to the harness: it logs it and validates the
           // definitions with the Pydantic models.
-          const answer = await send({ ...(payload || {}), action })
+          const answer = await sendCall(action, payload)
           if (action === 'scanDocument') return answer.ok ? scanDocumentCall(payload) : answer
           if (action === 'pickFiles') return answer.ok ? pickFilesCall(payload) : answer
           if (action === 'consumeReceivedDocuments')
@@ -587,6 +1216,23 @@
           if (action === 'dictate') return answer.ok ? dictateCall(payload) : answer
           if (action === 'previewFile') return answer.ok ? previewFileCall(payload) : answer
           if (action === 'getLayout') return { ok: true, ...layout }
+          if (action === 'showMenu') return answer.ok ? showMenuCall(payload) : answer
+          if (action === 'menuItems') return answer.ok ? menuItemsCall(payload) : answer
+          if (action === 'showAlert') return answer.ok ? showAlertCall(payload) : answer
+          if (action === 'toast') return answer.ok ? toastCall(payload) : answer
+          if (action === 'showPicker') return answer.ok ? showPickerCall(payload) : answer
+          if (action === 'updateSurface') return answer.ok ? updateSurfaceCall(payload) : answer
+          if (action === 'surfaceSearchResult')
+            return answer.ok ? surfaceSearchResultCall(payload) : answer
+          if (action === 'setKeyboardToolbar')
+            return answer.ok ? setKeyboardToolbarCall(payload) : answer
+          if (action === 'setKeyCommands') return answer.ok ? setKeyCommandsCall(payload) : answer
+          if (action === 'showDocument') return answer.ok ? showDocumentCall(payload) : answer
+          if (action === 'updateDocument') return answer.ok ? updateDocumentCall(payload) : answer
+          if (action === 'setChrome') {
+            if (answer.ok) applyChrome(payload)
+            return answer
+          }
           if (action === 'setBackInterception') {
             if (answer.ok) back.enabled = payload.enabled
             return answer
@@ -638,7 +1284,16 @@
           webAppId: 'e2e',
           capabilities,
           ...(features && { features }),
-          postMessage: (message) => void send(message),
+          postMessage: (message) => {
+            if (message.action === 'setChrome') {
+              try {
+                applyChrome(message)
+              } catch {
+                // an invalid part: the app drops it
+              }
+            }
+            void send(message, true)
+          },
           call: (action, payload) => call(action, payload),
         })
       }
