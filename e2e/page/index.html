@@ -28,7 +28,41 @@
               'camera',
               'nativeForms',
               'nativeContent',
+              'receiveDocuments',
+              'microphone',
             ]
+
+        // `?oldApp` is an app that predates contract 2026-11: no `features` at all,
+        // and every new action answers `unknownAction`. `?features=a,b` replaces the
+        // list like `capabilities` does (an empty value: none). Otherwise: all.
+        const ALL_FEATURES = [
+          'scanResult',
+          'scanOptions',
+          'pickFiles',
+          'receiveDocuments',
+          'mediaCapture',
+          'dictate',
+          'layout',
+          'backInterception',
+          'previewFile',
+          'tokenResources',
+        ]
+        const features = params.has('oldApp')
+          ? undefined
+          : params.has('features')
+            ? params.get('features').split(',').filter(Boolean)
+            : ALL_FEATURES
+        // The actions that only an app with the feature knows.
+        const FEATURE_OF = {
+          pickFiles: 'pickFiles',
+          consumeReceivedDocuments: 'receiveDocuments',
+          dictate: 'dictate',
+          getLayout: 'layout',
+          setBackInterception: 'backInterception',
+          backResult: 'backInterception',
+          previewFile: 'previewFile',
+        }
+        const has = (feature) => !!features && features.includes(feature)
 
         // --- Native surfaces -------------------------------------------------
         // A stand-in for the app's native sheets. Tests push what "the user"
@@ -298,10 +332,269 @@
           return { ok: true, value: step.value }
         }
 
+        // --- Documents: scan, pick, share ---------------------------------------
+        // A stand-in for the native scanner, picker and Share Extension. Like the
+        // app it uploads each file to the document router with the fields of the
+        // contract (file, device_id, user_email, kind, upload_id, context) and
+        // retries ONCE with the same upload_id after a network error or HTTP 5xx.
+        // Tests push what "the user" does onto `window.__docs.script`, one entry per
+        // scanDocument / pickFiles call:
+        //
+        //   { error: 'cancelled' | 'unavailable' | … }   the app answers with this error
+        //   { documents: [spec, …] }                      the documents the user finishes
+        //                                                  (without `multiple` only the first)
+        //
+        //   spec = { name, mime?, content?, pages?,
+        //            fail?: true,             this document fails
+        //            tooLarge?: true,         beyond 25,000,000 bytes
+        //            dropResponse?: true }    the first response is lost (network error)
+        //
+        // `window.__share(specs)` plays the Share Extension: it uploads (kind
+        // "shared") and then calls `window.onNativeDocumentsReceived` if the page has
+        // one, otherwise it queues the batch for `consumeReceivedDocuments`.
+        const docs = { script: [], queue: [], previews: [], opened: [] }
+        window.__docs = docs
+
+        function toBase64(bytes) {
+          let binary = ''
+          for (const b of bytes) binary += String.fromCharCode(b)
+          return btoa(binary)
+        }
+
+        async function uploadOnce(spec, bytes, uploadId, kind, context, dropResponse) {
+          const body = new FormData()
+          body.set('device_id', 'e2e-device')
+          body.set('user_email', 'anna@example.com')
+          body.set('kind', kind)
+          body.set('upload_id', uploadId)
+          if (context) body.set('context', JSON.stringify(context))
+          body.set('file', new Blob([bytes], { type: spec.mime || 'application/pdf' }), spec.name)
+          try {
+            const response = await fetch('/api/documents', { method: 'POST', body })
+            if (dropResponse) throw new Error('response lost')
+            const json = await response.json().catch(() => null)
+            return { status: response.status, body: json && typeof json === 'object' ? json : null }
+          } catch {
+            return null // network error
+          }
+        }
+
+        async function makeDocument(spec, { mode, kind, context }) {
+          const bytes = new TextEncoder().encode(spec.content ?? 'content of ' + spec.name)
+          const uploadId = crypto.randomUUID()
+          const mime = spec.mime || 'application/pdf'
+          const base = { name: spec.name, mime, size: bytes.length, uploadId }
+          if (spec.pages) base.pages = spec.pages
+          if (spec.tooLarge)
+            return { name: spec.name, mime, size: 25000001, uploadId, error: 'tooLarge' }
+          if (spec.fail) return { name: spec.name, uploadId, error: 'failed' }
+          if (mode === 'return') return { ...base, data: toBase64(bytes) }
+          let outcome = await uploadOnce(spec, bytes, uploadId, kind, context, spec.dropResponse)
+          if (!outcome || outcome.status >= 500) {
+            outcome = await uploadOnce(spec, bytes, uploadId, kind, context, false)
+          }
+          if (!outcome) return { name: spec.name, uploadId, error: 'failed' }
+          const document = { ...base, upload: outcome }
+          if (outcome.status >= 400) document.error = 'failed'
+          return document
+        }
+
+        async function makeDocuments(specs, options) {
+          const documents = []
+          for (const spec of specs) documents.push(await makeDocument(spec, options))
+          return documents
+        }
+
+        async function scanDocumentCall(payload) {
+          if (!capabilities.includes('camera'))
+            return failure('capability', 'No camera capability.')
+          const step = docs.script.shift() || { error: 'cancelled' }
+          if (step.error) return failure(step.error, step.message)
+          const specs = step.documents || []
+          // An app without `scanOptions` ignores the options and runs the plain scan.
+          const options = has('scanOptions') ? payload || {} : {}
+          const finished = options.multiple ? specs : specs.slice(0, 1)
+          if (finished.length === 0) return failure('cancelled')
+          const documents = await makeDocuments(finished, {
+            mode: options.mode || 'upload',
+            kind: options.kind || 'scan',
+            context: options.context,
+          })
+          docs.opened.push({ action: 'scanDocument', options })
+          // An app without `scanResult` answers `{ ok: true }` only.
+          return has('scanResult') ? { ok: true, documents } : { ok: true }
+        }
+
+        async function pickFilesCall(payload) {
+          const options = payload || {}
+          if (options.sources.includes('camera') && !capabilities.includes('camera')) {
+            return failure('capability', 'No camera capability.')
+          }
+          const step = docs.script.shift() || { error: 'cancelled' }
+          if (step.error) return failure(step.error, step.message)
+          const chosen = options.multiple
+            ? step.documents || []
+            : (step.documents || []).slice(0, 1)
+          if (chosen.length === 0) return failure('cancelled')
+          // Photos are delivered as JPEG.
+          const specs = chosen.map((s) => (s.photo ? { ...s, mime: 'image/jpeg' } : s))
+          docs.opened.push({ action: 'pickFiles', options })
+          const documents = await makeDocuments(specs, {
+            mode: options.mode || 'return',
+            kind: options.kind || 'pick',
+            context: options.context,
+          })
+          return { ok: true, documents }
+        }
+
+        window.__share = async (specs) => {
+          const documents = await makeDocuments(specs, { mode: 'upload', kind: 'shared' })
+          if (typeof window.onNativeDocumentsReceived === 'function') {
+            window.onNativeDocumentsReceived({ documents })
+            return 'delivered'
+          }
+          docs.queue.push(...documents)
+          return 'queued'
+        }
+
+        // --- Dictation ---------------------------------------------------------
+        // Tests push `{ text, locale? }` or `{ error }` onto `window.__voice.script`.
+        const voice = { script: [], opened: [] }
+        window.__voice = voice
+
+        async function dictateCall(payload) {
+          if (!capabilities.includes('microphone')) {
+            return failure('capability', 'No microphone capability.')
+          }
+          const step = voice.script.shift() || { error: 'cancelled' }
+          voice.opened.push(payload || {})
+          if (step.error) return failure(step.error, step.message)
+          return {
+            ok: true,
+            text: step.text,
+            locale: (payload && payload.locale) || step.locale || 'en-US',
+          }
+        }
+
+        // `getUserMedia({ audio: true })` of the page: granted from its own origin
+        // with the capability `microphone` (and the feature `mediaCapture`), denied
+        // otherwise.
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+          navigator.mediaDevices.getUserMedia = async (constraints) => {
+            if (!capabilities.includes('microphone') || !has('mediaCapture')) {
+              throw new DOMException('Permission denied', 'NotAllowedError')
+            }
+            return real(constraints)
+          }
+        }
+
+        // --- Layout ------------------------------------------------------------
+        // `window.__layout.set({ keyboardHeight: 336, … })` is the keyboard coming up,
+        // a rotation or a Split View resize: like the app it updates the CSS property
+        // and the attributes on <html> and calls `window.onNativeLayoutChange`.
+        const layout = {
+          keyboardHeight: 0,
+          keyboardVisible: false,
+          sizeClass: 'compact',
+          orientation: 'portrait',
+          width: 390,
+          height: 664,
+        }
+        function applyLayout() {
+          if (!has('layout')) return
+          const root = document.documentElement
+          root.style.setProperty('--bms-keyboard-height', layout.keyboardHeight + 'px')
+          root.setAttribute('data-bms-size-class', layout.sizeClass)
+          root.setAttribute('data-bms-orientation', layout.orientation)
+        }
+        applyLayout()
+        window.__layout = {
+          state: layout,
+          set(patch) {
+            Object.assign(layout, patch)
+            if (patch.keyboardHeight !== undefined && patch.keyboardVisible === undefined) {
+              layout.keyboardVisible = layout.keyboardHeight > 0
+            }
+            applyLayout()
+            if (typeof window.onNativeLayoutChange === 'function') {
+              window.onNativeLayoutChange({ ...layout })
+            }
+          },
+        }
+
+        // --- Back interception -------------------------------------------------
+        // `window.__back.press('button' | 'swipe')` is the user: resolves with what the
+        // app then does — 'handled', 'default' (the page said no, did not answer within
+        // 800 ms, or interception is off) — and `longPress()` always 'close'.
+        const back = { enabled: false, pending: null }
+        window.__back = {
+          get enabled() {
+            return back.enabled
+          },
+          async press(source) {
+            if (!back.enabled || typeof window.onNativeBackRequested !== 'function')
+              return 'default'
+            const answered = new Promise((resolve) => (back.pending = resolve))
+            const timeout = new Promise((resolve) =>
+              setTimeout(() => resolve({ handled: false }), 800)
+            )
+            window.onNativeBackRequested({ source })
+            const answer = await Promise.race([answered, timeout])
+            back.pending = null
+            return answer.handled === true ? 'handled' : 'default'
+          },
+          longPress: () => 'close',
+        }
+
+        // --- Preview -----------------------------------------------------------
+        // Downloads the file with the page's cookies, like the app, and "opens Quick
+        // Look" (`window.__docs.previews`).
+        async function previewFileCall(payload) {
+          const response = await fetch(payload.url, { credentials: 'include' })
+          if (response.status >= 400) return { ok: false, error: 'failed', status: response.status }
+          const bytes = await response.arrayBuffer()
+          docs.previews.push({
+            url: payload.url,
+            filename: payload.filename || payload.url.split('/').pop(),
+            size: bytes.byteLength,
+          })
+          return { ok: true }
+        }
+
         async function call(action, payload) {
+          // An app without the feature does not know the action.
+          if (FEATURE_OF[action] && !has(FEATURE_OF[action])) {
+            await send({ ...(payload || {}), action })
+            return failure('unknownAction')
+          }
+          // An app without `tokenResources` ignores the resource: the normal token.
+          if (action === 'getAccessToken') {
+            if (!capabilities.includes('identity'))
+              return failure('capability', 'No identity capability.')
+            if (payload && payload.resource !== undefined && !has('tokenResources')) {
+              const { resource, interactive, ...plain } = payload
+              return send({ ...plain, action })
+            }
+          }
           // Every message goes to the harness: it logs it and validates the
           // definitions with the Pydantic models.
           const answer = await send({ ...(payload || {}), action })
+          if (action === 'scanDocument') return answer.ok ? scanDocumentCall(payload) : answer
+          if (action === 'pickFiles') return answer.ok ? pickFilesCall(payload) : answer
+          if (action === 'consumeReceivedDocuments')
+            return { ok: true, documents: docs.queue.splice(0) }
+          if (action === 'dictate') return answer.ok ? dictateCall(payload) : answer
+          if (action === 'previewFile') return answer.ok ? previewFileCall(payload) : answer
+          if (action === 'getLayout') return { ok: true, ...layout }
+          if (action === 'setBackInterception') {
+            if (answer.ok) back.enabled = payload.enabled
+            return answer
+          }
+          if (action === 'backResult') {
+            if (answer.ok && back.pending) back.pending(payload)
+            return answer
+          }
           if (action === 'showForm' || action === 'showContent') {
             return answer.ok ? present(action, payload || {}) : answer
           }
@@ -344,6 +637,7 @@
           appVersion: 'e2e',
           webAppId: 'e2e',
           capabilities,
+          ...(features && { features }),
           postMessage: (message) => void send(message),
           call: (action, payload) => call(action, payload),
         })

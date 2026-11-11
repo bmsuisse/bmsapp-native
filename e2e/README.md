@@ -31,7 +31,31 @@ media to the real document router, calls `window.onNativeSurfaceAction` for a
 round trip and takes the page's `surfaceResult`. `/?capabilities=a,b` replaces
 the capability list, `/?browser=1` removes `BMSNative`.
 
+For the contract of 2026-11 it also plays (see the comments in the page):
+
+- the scanner, the file picker and the Share Extension (`window.__docs.script`,
+  `window.__share(specs)`): it uploads like the app, with `file`, `device_id`,
+  `user_email`, `kind`, `upload_id` and `context`, retries **once** with the same
+  `upload_id` after a network error or a 5xx, and delivers the batch to
+  `window.onNativeDocumentsReceived` or queues it for `consumeReceivedDocuments`;
+- the dictation sheet (`window.__voice.script`) and the microphone permission of
+  `getUserMedia`;
+- the layout (`window.__layout.set({ keyboardHeight: 336 })` updates `<html>` and calls
+  `window.onNativeLayoutChange`);
+- the back button and swipe (`window.__back.press('button')`, with the 800 ms
+  limit, and `longPress()`);
+- `previewFile` (downloads with `fetch` and records the preview) and resource tokens
+  (the harness mints tokens for an "other API" that the main backend rejects).
+
+`/?features=a,b` replaces the `window.BMSNative.features` list (an empty value: none),
+and **`/?oldApp`** plays an app that predates the contract: no `features`, and every
+new action answers `unknownAction`.
+
 ## What is tested
+
+`test_documents.py` and `test_voice_layout.py` cover the contract of 2026-11. Its
+`options` fixtures (`contract-fixtures/`) also run through the built package against
+the harness, which validates them in Python independently of the package.
 
 | Test                                                                                                                                                            | What                                                                                                                                                                                                         |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
