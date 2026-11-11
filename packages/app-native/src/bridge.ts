@@ -90,6 +90,17 @@ export type Capability =
  * - `dictate`, `layout`: `dictate`, `getLayout` and the layout event.
  * - `backInterception`: `onBackRequested`.
  * - `tokenResources`: `getAccessToken({ resource })`.
+ *
+ * 2026-11b (these need `customChrome`, `liveSurfaces` also `nativeForms` or `nativeContent`):
+ *
+ * - `menus`: `showMenu` and menus on action buttons. `titleMenu`: `setChrome({ title })`.
+ * - `alerts`: `showAlert`. `toastActions`: `toast` with an action.
+ * - `liveSurfaces`: `updateSurface` and `live` fields. `pageSearch`: search fields
+ *   with `source: 'page'`.
+ * - `navSearch`, `segments`, `sidebar`, `undoGestures`: the `search`, `segments`,
+ *   `sidebar` and `undo` parts of `setChrome`.
+ * - `keyboardToolbar`: `setKeyboardToolbar`. `keyCommands`: `setKeyCommands`.
+ * - `documentViewer`: `showDocument`, `updateDocument`. `pickers`: `showPicker`.
  */
 export const FEATURES = [
   'scanResult',
@@ -102,6 +113,21 @@ export const FEATURES = [
   'backInterception',
   'previewFile',
   'tokenResources',
+  // 2026-11b
+  'menus',
+  'titleMenu',
+  'alerts',
+  'toastActions',
+  'liveSurfaces',
+  'pageSearch',
+  'navSearch',
+  'keyboardToolbar',
+  'segments',
+  'sidebar',
+  'documentViewer',
+  'undoGestures',
+  'pickers',
+  'keyCommands',
 ] as const
 
 export type Feature = (typeof FEATURES)[number]

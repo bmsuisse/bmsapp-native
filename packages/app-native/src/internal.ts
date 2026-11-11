@@ -99,3 +99,53 @@ export function booleanProblem(name: string, value: unknown): string | undefined
     ? undefined
     : `${name} has to be a boolean.`
 }
+
+// --- Shared by the 2026-11b functions ------------------------------------------
+
+/** A rectangle in CSS px relative to the web view's visible viewport. */
+export type Anchor = { x: number; y: number; width: number; height: number }
+
+export function anchorProblem(anchor: unknown): string | undefined {
+  if (!isRecord(anchor)) return 'anchor has to be { x, y, width, height } in CSS px.'
+  for (const key of ['x', 'y', 'width', 'height'] as const) {
+    if (typeof anchor[key] !== 'number' || !Number.isFinite(anchor[key])) {
+      return `anchor.${key} has to be a finite number.`
+    }
+  }
+  return undefined
+}
+
+/** Characters (code points), not UTF-16 units. */
+export function textLength(text: string): number {
+  return Array.from(text).length
+}
+
+export function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value !== ''
+}
+
+/**
+ * `url` on the page's own origin (absolute or relative). Returns the absolute
+ * URL, or the reason it is not one.
+ */
+export function sameOriginUrl(
+  url: unknown,
+  name = 'url'
+): { problem: string; absolute?: undefined } | { problem?: undefined; absolute: string } {
+  if (!nonEmptyString(url)) {
+    return { problem: `${name} has to be a URL on the web app’s own origin.` }
+  }
+  if (typeof location === 'undefined') {
+    return { problem: 'there is no page to resolve url against.' }
+  }
+  let absolute: URL
+  try {
+    absolute = new URL(url, location.href)
+  } catch {
+    return { problem: `${name} is not a valid URL.` }
+  }
+  if (absolute.origin !== location.origin) {
+    return { problem: `${name} has to be on the web app’s own origin.` }
+  }
+  return { absolute: absolute.href }
+}

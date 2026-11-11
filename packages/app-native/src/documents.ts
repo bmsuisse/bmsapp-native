@@ -4,6 +4,7 @@
 // side is `bmsdna.app_native.documents`. Details: docs/documents-guide.md
 
 import { hasFeature, isNativeApp, type NativeFailure } from './bridge.js'
+import { isDevelopment, warn } from './dev.js'
 import {
   asFailure,
   badAnswer,
@@ -14,6 +15,8 @@ import {
   isRecord,
   kindProblem,
   modeProblem,
+  nonEmptyString,
+  sameOriginUrl,
   unavailable,
 } from './internal.js'
 
@@ -367,24 +370,13 @@ export type PreviewFileOptions = {
 export type PreviewFileResult = { ok: true } | (NativeFailure & { status?: number })
 
 function previewProblem(options: unknown): { problem?: string; absolute?: string } {
-  if (!isRecord(options) || typeof options.url !== 'string' || options.url === '') {
+  if (!isRecord(options))
     return { problem: 'options.url has to be a URL on the web app’s own origin.' }
-  }
   if (options.filename !== undefined && typeof options.filename !== 'string') {
     return { problem: 'filename has to be a string.' }
   }
-  if (typeof location === 'undefined')
-    return { problem: 'there is no page to resolve url against.' }
-  let absolute: URL
-  try {
-    absolute = new URL(options.url, location.href)
-  } catch {
-    return { problem: 'url is not a valid URL.' }
-  }
-  if (absolute.origin !== location.origin) {
-    return { problem: 'url has to be on the web app’s own origin.' }
-  }
-  return { absolute: absolute.href }
+  const { problem, absolute } = sameOriginUrl(options.url, 'url')
+  return problem ? { problem } : { absolute }
 }
 
 /**
@@ -413,4 +405,169 @@ export async function previewFile(options: PreviewFileOptions): Promise<PreviewF
   const status = (answer as { status?: unknown }).status
   if (typeof status === 'number') failure.status = status
   return failure
+}
+
+// --- showDocument: the native viewer ---------------------------------------------
+
+/** Limits of the viewer. */
+export const VIEWER_LIMITS = { highlights: 500 } as const
+
+/**
+ * A marked area on a page. `x`, `y`, `w`, `h` are fractions (0 to 1) of the page, the
+ * origin being the top left; `page` is 1-based.
+ */
+export type DocumentHighlight = {
+  id: string
+  page: number
+  x: number
+  y: number
+  w: number
+  h: number
+  style: 'primary' | 'secondary'
+  /** Shown as delivered. */
+  label?: string
+}
+
+export type ShowDocumentOptions = {
+  /** Echoed in the document events and used by `updateDocument`. */
+  id?: string
+  /** A PDF on this web app's own origin, loaded like `previewFile`. */
+  url: string
+  title?: string
+  /** 1-based page to open. */
+  page?: number
+  /** At most 500. */
+  highlights?: DocumentHighlight[]
+  /** The id of a highlight; the viewer scrolls to it. */
+  selected?: string
+}
+
+export type UpdateDocumentOptions = {
+  id: string
+  highlights?: DocumentHighlight[]
+  selected?: string
+  page?: number
+}
+
+/** `highlightId` is `null` outside a highlight; `x`, `y` are fractions of the page. */
+export type DocumentTapEvent = {
+  id: string
+  highlightId: string | null
+  page: number
+  x: number
+  y: number
+}
+
+export type DocumentPageEvent = { id: string; page: number }
+
+export type ShowDocumentResult = PreviewFileResult
+
+function fraction(value: unknown): boolean {
+  return typeof value === 'number' && value >= 0 && value <= 1
+}
+
+function highlightProblem(highlights: unknown): string | undefined {
+  if (!Array.isArray(highlights)) return 'highlights has to be a list.'
+  if (highlights.length > VIEWER_LIMITS.highlights) {
+    return `${highlights.length} highlights, the app takes at most ${VIEWER_LIMITS.highlights}.`
+  }
+  const ids = new Set<string>()
+  for (const [i, h] of highlights.entries()) {
+    const at = `highlights[${i}]`
+    if (!isRecord(h) || !nonEmptyString(h.id)) return `${at} needs an id.`
+    if (ids.has(h.id)) return `${at}: the id "${h.id}" is used twice.`
+    ids.add(h.id)
+    if (!(Number.isInteger(h.page) && (h.page as number) >= 1)) return `${at}.page is 1-based.`
+    for (const key of ['x', 'y', 'w', 'h'] as const) {
+      if (!fraction(h[key])) return `${at}.${key} has to be a fraction from 0 to 1.`
+    }
+    if (h.style !== 'primary' && h.style !== 'secondary')
+      return `${at}.style has to be primary or secondary.`
+    if (h.label !== undefined && typeof h.label !== 'string')
+      return `${at}.label has to be a string.`
+  }
+  return undefined
+}
+
+function viewerProblem(options: unknown, update: boolean): { problem?: string; absolute?: string } {
+  if (!isRecord(options)) return { problem: 'options have to be an object.' }
+  if (options.id !== undefined && !nonEmptyString(options.id))
+    return { problem: 'id has to be a non-empty string.' }
+  if (update && !nonEmptyString(options.id))
+    return { problem: 'id of the open viewer is required.' }
+  if (
+    options.page !== undefined &&
+    !(Number.isInteger(options.page) && (options.page as number) >= 1)
+  ) {
+    return { problem: 'page is a whole number from 1.' }
+  }
+  if (options.selected !== undefined && !nonEmptyString(options.selected)) {
+    return { problem: 'selected has to be the id of a highlight.' }
+  }
+  if (options.title !== undefined && typeof options.title !== 'string')
+    return { problem: 'title has to be a string.' }
+  if (options.highlights !== undefined) {
+    const problem = highlightProblem(options.highlights)
+    if (problem) return { problem }
+  }
+  if (update) return {}
+  const { problem, absolute } = sameOriginUrl(options.url, 'url')
+  return problem ? { problem } : { absolute }
+}
+
+/**
+ * Opens a PDF of your web app in the native full-screen viewer (zoom, page
+ * thumbnails, text search) with your **highlights** drawn on the pages, for example the
+ * places an offer's line items were read from. Requires `customChrome` and the feature
+ * `documentViewer`. Resolves `{ ok: true }` when the user closes the viewer.
+ *
+ * ```ts
+ * const off = on('documentTap', ({ highlightId }) => highlightId && selectLine(highlightId))
+ * await showDocument({
+ *   id: 'offer-pdf',
+ *   url: `/api/offers/${id}/file`,
+ *   highlights: [{ id: 'l1', page: 1, x: 0.1, y: 0.4, w: 0.8, h: 0.05, style: 'primary' }],
+ * })
+ * off()
+ * ```
+ *
+ * While it is open, `updateDocument` changes the highlights, the selection and the page.
+ * Events: `on('documentTap')` and `on('documentPage')`.
+ *
+ * `url` must be on the web app's own origin, else `invalid` (nothing is asked); it is
+ * sent as an absolute URL. An HTTP status of 400 or more is `{ ok: false, error:
+ * 'failed', status }`. Unavailable in the browser and in an app without the feature:
+ * show your own PDF viewer (or use `previewFile`).
+ */
+export async function showDocument(options: ShowDocumentOptions): Promise<ShowDocumentResult> {
+  const { problem, absolute } = viewerProblem(options, false)
+  if (problem || !absolute) return invalid('showDocument', problem ?? 'invalid url.')
+  if (
+    isDevelopment() &&
+    options.selected !== undefined &&
+    options.highlights &&
+    !options.highlights.some((h) => h.id === options.selected)
+  ) {
+    warn('showDocument', [`selected "${options.selected}" is not one of the highlights.`])
+  }
+  const answer = await callFeature('documentViewer', 'showDocument', { ...options, url: absolute })
+  if (answer.ok) return { ok: true }
+  const failure: PreviewFileResult = asFailure(answer)
+  const status = (answer as { status?: unknown }).status
+  if (typeof status === 'number') failure.status = status
+  return failure
+}
+
+/**
+ * Updates the open viewer `id`: replaces `highlights`, selects one (`selected`, the
+ * viewer scrolls to it) or goes to a `page`. Answers `notFound` if no such viewer is
+ * open.
+ */
+export async function updateDocument(
+  options: UpdateDocumentOptions
+): Promise<{ ok: true } | NativeFailure> {
+  const { problem } = viewerProblem(options, true)
+  if (problem) return invalid('updateDocument', problem)
+  const answer = await callFeature('documentViewer', 'updateDocument', { ...options })
+  return answer.ok ? { ok: true } : asFailure(answer)
 }

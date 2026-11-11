@@ -190,6 +190,55 @@ if (!res.ok && res.error === 'failed')
   is `{ ok: false, error: 'failed', status }`.
 - In the browser it opens the URL in a new tab and resolves `{ ok: true }`.
 
+## `showDocument`: the native viewer
+
+For a PDF whose **places matter** (the lines of an offer, the fields an assistant read),
+`previewFile` is too little. `showDocument` opens a full-screen PDFKit viewer (pinch zoom,
+page thumbnails, text search) with **highlights** you draw on the pages. Feature
+`documentViewer`, needs `customChrome`.
+
+```ts
+import { showDocument, updateDocument, on } from '@bmsuisse/app-native'
+
+const off = [
+  on('documentTap', ({ highlightId, page }) => highlightId && selectLine(highlightId)),
+  on('documentPage', ({ page }) => rememberPage(page)),
+]
+const closed = showDocument({
+  id: 'offer-pdf',
+  url: `/api/offers/${id}/file`,
+  title: 'Offer 4711',
+  highlights: [
+    { id: 'l1', page: 1, x: 0.1, y: 0.4, w: 0.8, h: 0.05, style: 'primary', label: 'Pallet' },
+  ],
+  selected: 'l1',
+})
+// later, while it is open:
+await updateDocument({ id: 'offer-pdf', selected: 'l2', highlights: lines.map(toHighlight) })
+await closed // { ok: true } once the user closes the viewer
+off.forEach((stop) => stop())
+```
+
+| Option       | Meaning                                                                          |
+| ------------ | -------------------------------------------------------------------------------- |
+| `id`         | Echoed in the events and used by `updateDocument`. Give one                      |
+| `url`        | Same origin, loaded like `previewFile` (cookies, bearer with `identity`)         |
+| `title`      | Optional                                                                         |
+| `page`       | 1-based page to open                                                             |
+| `highlights` | At most 500: `{ id, page, x, y, w, h, style: 'primary' \| 'secondary', label? }` |
+| `selected`   | The id of a highlight; the viewer scrolls to it                                  |
+
+`x`, `y`, `w`, `h` are **fractions (0 to 1) of the page**, the origin at the top left;
+`page` is 1-based. Events: `documentTap` `{ id, highlightId, page, x, y }` (`highlightId`
+is `null` outside a highlight) and `documentPage` `{ id, page }`.
+
+`updateDocument({ id, highlights?, selected?, page? })` changes the open viewer and answers
+`notFound` if it is not open. `showDocument` resolves `{ ok: true }` when the viewer is
+closed, `failed` with `status` for an HTTP status of 400 or more (like `previewFile`),
+`invalid` for a foreign origin or a bad highlight (not asked), and `unavailable` in the
+browser and in an app without the feature: show your own PDF viewer (or `previewFile`).
+The URL is sent as an absolute one.
+
 ## The backend
 
 The uploads go to the document router, the same one that receives `scanDocument` and

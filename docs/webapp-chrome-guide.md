@@ -338,6 +338,11 @@ window.onNativeBottomBarTap = (id) => {
 }
 ```
 
+More callbacks exist for the newer parts of `setChrome` (title, menus of action buttons,
+search, segments, sidebar, undo), the keyboard toolbar and key commands; they are listed in
+[Title, search, segments, sidebar, undo](#title-search-segments-sidebar-undo-2026-11b), and
+`on(…)` of the package dispatches all of them.
+
 The app itself runs **no** logic — it only displays what you give it and, on
 a tap, only calls back with the matching `id`. What happens next is entirely
 up to your own JS code.
@@ -641,6 +646,163 @@ Without the package: `BMSNative.call('setBackInterception', { enabled: true })`,
 `window.onNativeBackRequested = ({ source }) => …` and answer with
 `BMSNative.call('backResult', { handled })` within 800 ms.
 
+## Title, search, segments, sidebar, undo (2026-11b)
+
+The page can hand more of its header to the app: the navigation title with a menu, a
+search field, segments, an iPad sidebar and undo. All are parts of `setChrome`, need
+`customChrome`, and each has its own feature flag (`hasFeature`): an app that lacks it
+**ignores** that part, and in the browser `setChrome` does nothing, so the page keeps its
+own header, search field, segmented control, list and undo button where `hasFeature` is
+`false`. Omitting a part in a later `setChrome` removes it again. Development builds check
+the limits of every part (`chromeLimitWarnings`) and say which part the app does not list.
+
+```ts
+import { setChrome, on, hasFeature } from '@bmsuisse/app-native'
+
+setChrome({
+  title: {
+    text: 'Offer 4711',
+    subtitle: 'Müller AG',
+    menu: [{ items: [{ id: 'rename', label: 'Rename' }] }],
+  },
+  search: { id: 'offers', placeholder: 'Search offers' },
+  segments: {
+    id: 'view',
+    items: [
+      { id: 'lines', label: 'Lines' },
+      { id: 'docs', label: 'Documents' },
+    ],
+    selected: 'lines',
+  },
+  undo: { canUndo: true, canRedo: false, undoLabel: 'Delete line' },
+})
+```
+
+| Part                   | Feature        | Events (`on(…)`)                                                                        |
+| ---------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| `title`                | `titleMenu`    | `titleMenuSelect` `{ id }`                                                              |
+| `actionButtons[].menu` | `menus`        | `actionButtonMenuSelect` `{ buttonId, id }`                                             |
+| `search`               | `navSearch`    | `search` `{ id, query, scope, submitted, source }`, `searchCancel` `{ id }`             |
+| `segments`             | `segments`     | `segmentSelect` `{ id, item }`                                                          |
+| `sidebar`              | `sidebar`      | `sidebarSelect` `{ id }`, `sidebarAction` `{ itemId, id }`, `sidebarSearch` `{ query }` |
+| `undo`                 | `undoGestures` | `undo` `{ action: 'undo' \| 'redo' }`                                                   |
+
+Every text is shown as delivered: localize it. The events are the globals
+`window.onNativeTitleMenuSelect`, `onNativeActionButtonMenuSelect`, `onNativeSearch`,
+`onNativeSearchCancel`, `onNativeSegmentSelect`, `onNativeSidebarSelect`,
+`onNativeSidebarAction`, `onNativeSidebarSearch` and `onNativeUndo`; `on(…)` installs and
+dispatches them.
+
+### Title and title menu
+
+`title: { text, subtitle?, menu?: MenuSection[] }` replaces the web app's name in the
+native navigation bar. With a `menu` the title becomes a title menu (the usual "Offer
+4711 ▾"); a selection arrives as `on('titleMenuSelect', ({ id }) => …)`. The menu follows
+the rules of [`showMenu`](menus-and-alerts-guide.md#showmenu): two levels, 80 items,
+labels of 80 characters, unique ids. Give the sections themselves: the lazy mechanism
+(`children: 'lazy'`) is described for `showMenu` only, because these menus have no `menuId`
+to answer to (the package warns in development builds).
+
+### Menus on action buttons
+
+`actionButtons: [{ id, icon, label?, menu?: MenuSection[] }]`. A button with a `menu`
+opens a pull-down menu when tapped **instead of firing `actionButtonTap`**; a selection
+arrives as `on('actionButtonMenuSelect', ({ buttonId, id }) => …)`. In an app without the
+feature `menus` the button simply fires `actionButtonTap`, so handle both:
+
+```ts
+on('actionButtonTap', (id) => id === 'more' && openMyOwnMenu())
+on('actionButtonMenuSelect', ({ buttonId, id }) => run(buttonId, id))
+```
+
+### Search field in the navigation bar
+
+`search: { id, placeholder, value?, scopes?: [{ id, label }], scope?, barcode? }` shows a
+native search field. The page drops its own. Events: `search` with `source` `typing`
+(debounced 250 ms), `submit` (the Search key) or `barcode`, and `searchCancel`.
+`barcode: true` (needs `camera`) adds a scan button; the scanned code arrives as `query`
+with `source: 'barcode'` and `submitted: true`.
+
+### Segments
+
+`segments: { id, items: [{ id, label, badge? }], selected }`: 2 to 5 items, `badge` a
+short string. A segmented control directly under the navigation bar; a tap selects it and
+calls `segmentSelect`. Replace the page's own tab/filter chips.
+
+### iPad sidebar
+
+`sidebar: { title, search?: { placeholder }, sections: [{ title?, items: [{ id, label,
+subtitle?, icon?, badge?, selected?, trailingActions? }] }], footer? }`, at most 300 items.
+A native, collapsible column with the web view to its right (a toggle button sits in the
+navigation bar). **Only in the regular horizontal size class**: in compact width the app
+ignores it and the page shows its own list, so decide with `data-bms-size-class` (or
+`on('layoutChange')`) which UI to render:
+
+```ts
+const useNativeSidebar =
+  hasFeature('sidebar') && document.documentElement.dataset.bmsSizeClass === 'regular'
+```
+
+Sending it again replaces the content and keeps the scroll position and the selection.
+Swipe actions (`trailingActions`, `style: 'destructive'`) arrive as `sidebarAction`; typing
+in the sidebar search as `sidebarSearch` (debounced 250 ms).
+
+### Undo gestures
+
+`undo: { canUndo, canRedo, undoLabel?, redoLabel? }` enables shake to undo, the iPad
+three-finger undo/redo gestures and the Undo/Redo entries of the edit menu. Each calls
+`on('undo', ({ action }) => …)` with `'undo'` or `'redo'`; the app shows the labels where
+iOS shows an action name ("Undo Delete line"). Call `setChrome` again whenever
+`canUndo`/`canRedo` change; omitting `undo` disables the gestures.
+
+## Keyboard toolbar
+
+`setKeyboardToolbar({ items: [{ id, label?, icon?, style?: 'plain' | 'prominent' }], done? })`
+puts a native toolbar above the on-screen keyboard while a field of the page has focus: at
+most 6 items, each with a `label` or an `icon`; `done: true` adds a trailing Done button
+that blurs the field. A tap arrives as `on('keyboardToolbarTap', ({ id }) => …)` and
+**keeps the focus**. `{ items: [] }` removes it; it is not shown with a hardware keyboard.
+Feature `keyboardToolbar`, needs `customChrome`.
+
+```ts
+await setKeyboardToolbar({
+  items: [
+    { id: 'prev', icon: 'chevron.up' },
+    { id: 'next', icon: 'chevron.down' },
+    { id: 'add', label: 'Add line', style: 'prominent' },
+  ],
+  done: true,
+})
+on('keyboardToolbarTap', ({ id }) => run(id))
+```
+
+## Key commands
+
+`setKeyCommands({ commands: [{ id, input, modifiers, title, group? }] })` registers
+hardware key commands (an extension of the iPad section above): at most 60; `input` is one
+character or `up`, `down`, `left`, `right`, `escape`, `return`, `tab`, `delete`;
+`modifiers` a possibly empty list of `command`, `option`, `shift`, `control`.
+
+- Only with a hardware keyboard. Registered commands appear in the iPad ⌘-hold overlay and
+  the menu bar under `group`.
+- **The app consumes a registered command** and calls `on('keyCommand', ({ id }) => …)`
+  _instead of_ the DOM `keydown`. Keys that are not registered keep the behaviour above:
+  they reach the page as `keydown`.
+- A command **without modifiers** fires only while **no text field** of the page has
+  focus (so an `escape` or `down` command does not steal keys from an input).
+- `{ commands: [] }` removes them. Feature `keyCommands`, needs `customChrome`.
+
+```ts
+await setKeyCommands({
+  commands: [
+    { id: 'search', input: 'k', modifiers: ['command'], title: 'Search', group: 'Offers' },
+    { id: 'next-line', input: 'down', modifiers: [], title: 'Next line', group: 'Navigate' },
+  ],
+})
+on('keyCommand', ({ id }) => run(id))
+// the browser has no feature: listen to keydown there, it does not fire in the app for these keys
+```
+
 ## More bridge actions
 
 ### Is my page running in the app? — `window.BMSNative`
@@ -667,7 +829,10 @@ if (window.BMSNative) {
 
 `BMSNative.features` lists the contract features the app implements: `scanResult`,
 `scanOptions`, `pickFiles`, `receiveDocuments`, `mediaCapture`, `dictate`, `layout`,
-`backInterception`, `previewFile`, `tokenResources`. What is not listed is not
+`backInterception`, `previewFile`, `tokenResources`, and since 2026-11b `menus`,
+`titleMenu`, `alerts`, `toastActions`, `liveSurfaces`, `pageSearch`, `navSearch`,
+`keyboardToolbar`, `segments`, `sidebar`, `documentViewer`, `undoGestures`, `pickers`,
+`keyCommands`. What is not listed is not
 supported; an older app has no `features` at all (treat it as an empty list). With the
 package: `hasFeature('pickFiles')`. Every package function that depends on a feature
 answers `unavailable` without asking an app that lacks it.
@@ -729,6 +894,15 @@ const { ok } = await BMSNative.call('biometricConfirm', { reason: 'Approve order
 | `dictate`                                                          | `locale?`, `maxSeconds?`, `contextualStrings?`                                                                             | `.microphone`                      | Native dictation sheet; resolves with the text — see [voice-guide.md](voice-guide.md)                                                                                                                                                                                                 |
 | `getLayout`                                                        | —                                                                                                                          | —                                  | Keyboard height, size class, orientation and size of the web view (see "Layout" above)                                                                                                                                                                                                |
 | `setBackInterception` / `backResult`                               | `enabled` / `handled`                                                                                                      | —                                  | The page takes over the back button and swipe (see "Intercepting the back button" above)                                                                                                                                                                                              |
+| `showMenu`                                                         | `id?`, `anchor`, `preview?`, `sections`                                                                                    | `.customChrome`                    | Native menu at an anchor (context menu on iPhone), lazy submenus — see [menus-and-alerts-guide.md](menus-and-alerts-guide.md)                                                                                                                                                         |
+| `menuItems`                                                        | `requestId`, `sections`                                                                                                    | `.customChrome`                    | The page's answer to `onNativeMenuExpand` within 5 s                                                                                                                                                                                                                                  |
+| `showAlert`                                                        | `title`, `message?`, `style?`, `anchor?`, `actions`, `textField?`                                                          | `.customChrome`                    | Native alert or action sheet — see [menus-and-alerts-guide.md](menus-and-alerts-guide.md)                                                                                                                                                                                             |
+| `toast` (with `call`)                                              | `message`, `style?`, `duration?`, `action?`                                                                                | —                                  | Resolves `{ ok, toastId }`; a tap on `action` calls `onNativeToastAction`                                                                                                                                                                                                             |
+| `showPicker`                                                       | `kind`, `anchor?`, `title?`, `value?`, `min?`, `max?`, `options?`                                                          | `.customChrome`                    | Native date or option picker                                                                                                                                                                                                                                                          |
+| `updateSurface` / `surfaceSearchResult`                            | see [native-surfaces-guide.md](native-surfaces-guide.md#live-surfaces)                                                     | `.customChrome` + a surface        | Changes the open surface; the page's answer to a page search                                                                                                                                                                                                                          |
+| `setKeyboardToolbar`                                               | `items`, `done?`                                                                                                           | `.customChrome`                    | Toolbar above the on-screen keyboard (see "Keyboard toolbar" above)                                                                                                                                                                                                                   |
+| `showDocument` / `updateDocument`                                  | `url`, `highlights?`, … / `id`, …                                                                                          | `.customChrome`                    | Native PDF viewer with highlights — see [documents-guide.md](documents-guide.md#showdocument-the-native-viewer)                                                                                                                                                                       |
+| `setKeyCommands`                                                   | `commands`                                                                                                                 | `.customChrome`                    | Hardware key commands (see "Key commands" above)                                                                                                                                                                                                                                      |
 | `navigate`                                                         | `destination` (place or text), `waypoints?`, `mode?`, `app?`                                                               | —                                  | Starts a route in Apple Maps, Google Maps or Waze — see [device-actions-guide.md](device-actions-guide.md)                                                                                                                                                                            |
 | `addReminder`                                                      | `title`, `due?`, `allDay?`, `notes?`, `priority?`, `list?`, `url?`, `confirm?`                                             | `.deviceApps`                      | Creates a reminder in Apple Reminders (asks first) — see [device-actions-guide.md](device-actions-guide.md)                                                                                                                                                                           |
 | `saveContact`                                                      | `givenName?`, `familyName?`, `organization?`, `jobTitle?`, `phones?`, `emails?`, `address?`, `url?`, `confirm?`            | `.deviceApps`                      | Saves a contact (system form first) — see [device-actions-guide.md](device-actions-guide.md)                                                                                                                                                                                          |

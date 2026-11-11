@@ -1,0 +1,298 @@
+{
+  "description": "Alerts and action sheets (feature alerts): showAlert options and results.",
+  "options": {
+    "valid": [
+      {
+        "name": "a confirmation",
+        "value": {
+          "title": "Delete offer?",
+          "message": "This cannot be undone.",
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            },
+            {
+              "id": "delete",
+              "label": "Delete",
+              "style": "destructive"
+            }
+          ]
+        }
+      },
+      {
+        "name": "an action sheet at an anchor",
+        "value": {
+          "title": "Export",
+          "style": "actionSheet",
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "actions": [
+            {
+              "id": "pdf",
+              "label": "PDF",
+              "preferred": true
+            },
+            {
+              "id": "xml",
+              "label": "XML"
+            },
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            }
+          ]
+        }
+      },
+      {
+        "name": "an alert with an input line",
+        "value": {
+          "title": "Rename",
+          "style": "alert",
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            },
+            {
+              "id": "ok",
+              "label": "OK",
+              "preferred": true
+            }
+          ],
+          "textField": {
+            "placeholder": "Name",
+            "value": "Offer 4711",
+            "keyboard": "default",
+            "maxLength": 40
+          }
+        }
+      },
+      {
+        "name": "six actions",
+        "value": {
+          "title": "Pick",
+          "actions": {
+            "@repeat": 6,
+            "of": {
+              "id": "a{k}",
+              "label": "Action {k}"
+            }
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no actions",
+        "value": {
+          "title": "T",
+          "actions": []
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "seven actions",
+        "value": {
+          "title": "T",
+          "actions": {
+            "@repeat": 7,
+            "of": {
+              "id": "a{k}",
+              "label": "Action {k}"
+            }
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "two cancel actions",
+        "value": {
+          "title": "T",
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            },
+            {
+              "id": "c2",
+              "label": "Cancel 2",
+              "style": "cancel"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a text field in an action sheet",
+        "value": {
+          "title": "T",
+          "style": "actionSheet",
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            }
+          ],
+          "textField": {
+            "placeholder": "x"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an unknown style",
+        "value": {
+          "title": "T",
+          "style": "banner",
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an action without id",
+        "value": {
+          "title": "T",
+          "actions": [
+            {
+              "label": "OK"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an unknown keyboard",
+        "value": {
+          "title": "T",
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            }
+          ],
+          "textField": {
+            "keyboard": "phone"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "maxLength 0",
+        "value": {
+          "title": "T",
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            }
+          ],
+          "textField": {
+            "maxLength": 0
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an anchor without width",
+        "value": {
+          "title": "T",
+          "style": "actionSheet",
+          "anchor": {
+            "x": 1,
+            "y": 2,
+            "height": 3
+          },
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "no title",
+        "value": {
+          "actions": [
+            {
+              "id": "cancel",
+              "label": "Cancel",
+              "style": "cancel"
+            }
+          ]
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "an action was tapped",
+        "value": {
+          "ok": true,
+          "id": "delete"
+        }
+      },
+      {
+        "name": "an action with the typed text",
+        "value": {
+          "ok": true,
+          "id": "ok",
+          "text": "Offer 4712"
+        }
+      },
+      {
+        "name": "cancelled, no cancel action",
+        "value": {
+          "ok": false,
+          "error": "cancelled"
+        }
+      },
+      {
+        "name": "no customChrome capability",
+        "value": {
+          "ok": false,
+          "error": "capability"
+        }
+      },
+      {
+        "name": "not available",
+        "value": {
+          "ok": false,
+          "error": "unavailable"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "ok without an id",
+        "value": {
+          "ok": true,
+          "text": "x"
+        },
+        "error": "failed"
+      }
+    ]
+  }
+}

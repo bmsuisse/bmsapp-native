@@ -1,0 +1,209 @@
+{
+  "description": "The iPad sidebar (feature sidebar): `setChrome({ sidebar })`. Only in the regular size class.",
+  "chrome": {
+    "valid": [
+      {
+        "name": "sections with swipe actions",
+        "value": {
+          "sidebar": {
+            "title": "Offers",
+            "search": {
+              "placeholder": "Search offers"
+            },
+            "footer": "12 open",
+            "sections": [
+              {
+                "title": "Today",
+                "items": [
+                  {
+                    "id": "o1",
+                    "label": "Offer 4711",
+                    "subtitle": "Müller AG",
+                    "icon": "doc.text",
+                    "badge": "2",
+                    "selected": true,
+                    "trailingActions": [
+                      {
+                        "id": "archive",
+                        "label": "Archive",
+                        "icon": "archivebox"
+                      },
+                      {
+                        "id": "delete",
+                        "label": "Delete",
+                        "style": "destructive"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "items": [
+                  {
+                    "id": "o2",
+                    "label": "Offer 4712"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "the smallest",
+        "value": {
+          "sidebar": {
+            "title": "Offers",
+            "sections": []
+          }
+        }
+      },
+      {
+        "name": "exactly 300 items",
+        "value": {
+          "sidebar": {
+            "title": "Offers",
+            "sections": [
+              {
+                "items": {
+                  "@repeat": 300,
+                  "of": {
+                    "id": "o{k}",
+                    "label": "Offer {k}"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "301 items",
+        "value": {
+          "sidebar": {
+            "title": "Offers",
+            "sections": [
+              {
+                "items": {
+                  "@repeat": 301,
+                  "of": {
+                    "id": "o{k}",
+                    "label": "Offer {k}"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "no title",
+        "value": {
+          "sidebar": {
+            "sections": []
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an item without a label",
+        "value": {
+          "sidebar": {
+            "title": "T",
+            "sections": [
+              {
+                "items": [
+                  {
+                    "id": "o1"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a swipe action without an id",
+        "value": {
+          "sidebar": {
+            "title": "T",
+            "sections": [
+              {
+                "items": [
+                  {
+                    "id": "o1",
+                    "label": "A",
+                    "trailingActions": [
+                      {
+                        "label": "x"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "sections is not a list",
+        "value": {
+          "sidebar": {
+            "title": "T",
+            "sections": {}
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a search without a placeholder",
+        "value": {
+          "sidebar": {
+            "title": "T",
+            "search": {},
+            "sections": []
+          }
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "events": {
+    "sidebarSelect": {
+      "valid": [
+        {
+          "name": "a tap",
+          "value": {
+            "id": "o1"
+          }
+        }
+      ]
+    },
+    "sidebarAction": {
+      "valid": [
+        {
+          "name": "a swipe action",
+          "value": {
+            "itemId": "o1",
+            "id": "archive"
+          }
+        }
+      ]
+    },
+    "sidebarSearch": {
+      "valid": [
+        {
+          "name": "typing",
+          "value": {
+            "query": "mül"
+          }
+        }
+      ]
+    }
+  }
+}

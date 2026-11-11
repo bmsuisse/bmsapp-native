@@ -1,0 +1,148 @@
+{
+  "description": "The toolbar above the on-screen keyboard (feature keyboardToolbar).",
+  "options": {
+    "valid": [
+      {
+        "name": "labels and an icon, with Done",
+        "value": {
+          "items": [
+            {
+              "id": "prev",
+              "icon": "chevron.up"
+            },
+            {
+              "id": "next",
+              "icon": "chevron.down"
+            },
+            {
+              "id": "add",
+              "label": "Add line",
+              "style": "prominent"
+            }
+          ],
+          "done": true
+        }
+      },
+      {
+        "name": "remove it",
+        "value": {
+          "items": []
+        }
+      },
+      {
+        "name": "six items",
+        "value": {
+          "items": {
+            "@repeat": 6,
+            "of": {
+              "id": "t{k}",
+              "label": "T{k}"
+            }
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "seven items",
+        "value": {
+          "items": {
+            "@repeat": 7,
+            "of": {
+              "id": "t{k}",
+              "label": "T{k}"
+            }
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an item with neither label nor icon",
+        "value": {
+          "items": [
+            {
+              "id": "x"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an item without id",
+        "value": {
+          "items": [
+            {
+              "label": "x"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an unknown style",
+        "value": {
+          "items": [
+            {
+              "id": "x",
+              "label": "x",
+              "style": "loud"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "done is a string",
+        "value": {
+          "items": [],
+          "done": "yes"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "items missing",
+        "value": {
+          "done": true
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "set",
+        "value": {
+          "ok": true
+        }
+      },
+      {
+        "name": "not available",
+        "value": {
+          "ok": false,
+          "error": "unavailable"
+        }
+      },
+      {
+        "name": "no customChrome capability",
+        "value": {
+          "ok": false,
+          "error": "capability"
+        }
+      }
+    ],
+    "invalid": []
+  },
+  "events": {
+    "keyboardToolbarTap": {
+      "valid": [
+        {
+          "name": "a tap",
+          "value": {
+            "id": "add"
+          }
+        }
+      ]
+    }
+  }
+}

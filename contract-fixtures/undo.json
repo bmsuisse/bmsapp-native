@@ -1,0 +1,77 @@
+{
+  "description": "Undo gestures (feature undoGestures): `setChrome({ undo })` and `onNativeUndo`.",
+  "chrome": {
+    "valid": [
+      {
+        "name": "both available, with names",
+        "value": {
+          "undo": {
+            "canUndo": true,
+            "canRedo": true,
+            "undoLabel": "Delete line",
+            "redoLabel": "Add line"
+          }
+        }
+      },
+      {
+        "name": "nothing to undo",
+        "value": {
+          "undo": {
+            "canUndo": false,
+            "canRedo": true
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "canRedo missing",
+        "value": {
+          "undo": {
+            "canUndo": true
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "canUndo is a string",
+        "value": {
+          "undo": {
+            "canUndo": "yes",
+            "canRedo": false
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "undoLabel is a number",
+        "value": {
+          "undo": {
+            "canUndo": true,
+            "canRedo": false,
+            "undoLabel": 3
+          }
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "events": {
+    "undo": {
+      "valid": [
+        {
+          "name": "undo",
+          "value": {
+            "action": "undo"
+          }
+        },
+        {
+          "name": "redo",
+          "value": {
+            "action": "redo"
+          }
+        }
+      ]
+    }
+  }
+}

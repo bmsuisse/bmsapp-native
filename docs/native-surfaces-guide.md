@@ -195,7 +195,7 @@ An older app shows a type it does not know as `text`: see
 | `select`      | One of `options`; with `remote: true` loaded from your backend                                                                                                                                                                                                                | `string` (the option `value`), text in `labels` |
 | `toggle`      | Switch                                                                                                                                                                                                                                                                        | `boolean`                                       |
 | `date`        | Date                                                                                                                                                                                                                                                                          | `string` `yyyy-MM-dd`                           |
-| `search`      | Search field; results come from your backend (`minQueryLength`, default 2)                                                                                                                                                                                                    | `string` (the option `value`), text in `labels` |
+| `search`      | Search field; results come from your backend (`minQueryLength`, default 2), or from the page with `source: 'page'` ([live surfaces](#live-surfaces))                                                                                                                          | `string` (the option `value`), text in `labels` |
 | `textarea`    | Multi-line text; `maxLength` shows a counter                                                                                                                                                                                                                                  | `string`                                        |
 | `email`       | Text with the email keyboard and a format check                                                                                                                                                                                                                               | `string`                                        |
 | `phone`       | Text with the phone keyboard                                                                                                                                                                                                                                                  | `string`                                        |
@@ -528,6 +528,97 @@ user stuck.
 The low-level pieces are exported for special cases: `surfaceResult(payload)`,
 `on('surfaceAction', event => …)` and `onSurfaceAction(id, handler)`. Typical
 reason: a chained surface with a round trip of its own (see below).
+
+## Live surfaces
+
+A surface can change while it is open (feature **`liveSurfaces`**, and **`pageSearch`** for
+page search). It needs `customChrome`, and the capability of the surface itself. An app
+without the feature does not know these options: the package answers `unavailable` for a
+form that needs them, so the page shows its own UI, exactly as for any other missing
+feature (`isNativeSurfaceUnsupported`).
+
+### Block, field and list item ids
+
+Content blocks and the items of a `list` block may carry an `id`. When `updateSurface`
+replaces the blocks, the app keeps the **scroll position, the focus and the entered values**
+where ids persist: give every block you will update the same id each time.
+
+### `updateSurface`
+
+```ts
+import { updateSurface } from '@bmsuisse/app-native'
+
+await updateSurface({
+  id: 'offer', // the surface that is open
+  title: 'Offer 4711',
+  blocks: [
+    { type: 'heading', id: 'lines-heading', text: 'Lines (3)' },
+    { type: 'list', id: 'lines', items: lines.map((l) => ({ id: l.id, title: l.name })) },
+  ],
+})
+```
+
+Only the keys you give are replaced: `title`, `subtitle`, `blocks`, `actions` (content),
+`values`, `fields`, `pages` (forms). `notFound` if the surface is not open. The limits are
+those of `showForm` and `showContent`; development builds warn, the app answers `tooLarge`.
+
+### Live fields: `live` and `onChange`
+
+A field with `live: true` calls `window.onNativeSurfaceChange({ id, fieldId, value })` on
+every change (text input debounced 300 ms). With the package:
+
+```ts
+await showForm(
+  {
+    fields: [
+      { id: 'qty', type: 'stepper', label: 'Quantity' },
+      { id: 'price', type: 'number' },
+    ],
+  },
+  { onChange: (fieldId, value) => recalculate(fieldId, value) }
+)
+```
+
+`onChange` sets `live: true` on every input field that does not say otherwise (`info`
+fields are skipped), gives the form an `id` and removes the handler when the form closes.
+`showContent` takes the same option for its `fields` blocks. Combine it with `updateSurface`
+to recompute totals while the user types: new fields in an update are `live` as well.
+
+### Search answered by the page: `source: 'page'` and `onSearch`
+
+A `search` field with `source: 'page'` does not ask your backend; the page answers itself:
+
+```ts
+await showForm(
+  {
+    id: 'new-line',
+    fields: [
+      { id: 'article', type: 'search', label: 'Article', source: 'page', minQueryLength: 2 },
+    ],
+  },
+  { onSearch: async (fieldId, query) => await articles.find(query) } // up to 50 options
+)
+```
+
+Typing calls `window.onNativeSurfaceSearch({ id, fieldId, query, requestId })`, and the page
+answers with `BMSNative.call('surfaceSearchResult', { requestId, options })`, which
+`onSearch` does for you:
+
+- up to **50** options `{ value, label, subtitle?, image? }`; `image` is `https` or a
+  `data:` URI of at most 100 KB. The package cuts a longer list and leaves out an `image`
+  that does not qualify (development builds say so);
+- the answer has to arrive within **10 seconds**;
+- the app shows only the answer to the newest `requestId` of a field and ignores older ones.
+  The package does the same on its side: **a result that a newer request has replaced is
+  dropped**, as is one for a surface that has closed meanwhile;
+- a handler that throws is not answered (the user waits for the timeout; development builds
+  log it);
+- `minQueryLength` works as before. Without `source` the field asks your backend
+  (`widgetOptionsPath`), unchanged.
+
+Use `onSearch` only when every `source: 'page'` field of the form should go to it; the
+handler gets the `fieldId` to tell them apart. Development builds warn when the two do not
+belong together.
 
 ## Chained flows
 

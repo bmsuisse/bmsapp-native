@@ -359,8 +359,16 @@ class ActionField(_CamelModel):
     #: so the pattern is not checked here.)
     pattern: str | None = None
     pattern_message: str | None = None
-    #: `photo` only. Default in the app: `both`.
-    source: Literal["camera", "library", "both"] | None = None
+    #: `photo`: where the pictures come from (default in the app: `both`).
+    #: `search`: `"page"` lets the page answer the search itself (feature
+    #: `pageSearch`): typing calls `window.onNativeSurfaceSearch` and the page
+    #: answers with `surfaceSearchResult`. Without it the app asks your backend
+    #: (`create_widget_options_router`) as before.
+    source: Literal["camera", "library", "both", "page"] | None = None
+    #: Native forms and content only (feature `liveSurfaces`): every change of
+    #: the value calls `window.onNativeSurfaceChange` (text input debounced
+    #: 300 ms).
+    live: bool | None = None
     #: `photo` only: longest side in pixels after downscaling, 256 to 4096.
     #: Default 2048.
     max_dimension: int | None = Field(default=None, ge=MIN_PHOTO_DIMENSION, le=MAX_PHOTO_DIMENSION)
@@ -382,6 +390,8 @@ class ActionField(_CamelModel):
             raise ValueError(f"`{self.id}`: `fields` only belongs to the type `repeat`.")
         if self.type in ("multiselect", "segmented") and not self.options:
             raise ValueError(f"`{self.id}`: type `{self.type}` needs `options`.")
+        if self.source == "page" and self.type != "search":
+            raise ValueError(f"`{self.id}`: `source: page` only belongs to the type `search`.")
         _check_ranges(self)
         return self
 

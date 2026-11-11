@@ -41,9 +41,29 @@ for calls with a response, in sections:
 - `events`: payloads of the calls from the app into the page. `invalid` ones are
   ignored (`error: "ignored"`).
 
-Each case is `{ "name", "value", ["sent"], ["error"] }`. Two placeholders keep the files
-short: `"{origin}"` is the origin of the web app's page, and a string `"@N"` in `text`
-stands for N characters of `x` (in `contextualStrings` for a list of N entries).
+Each case is `{ "name", "value", ["sent"], ["error"] }`. Placeholders keep the files
+short: `"{origin}"` is the origin of the web app's page, a string `"@N"` stands for N
+characters of `x` (in `contextualStrings` for a list of N entries), and
+`{ "@repeat": N, "of": template }` stands for a list of N copies of the template with `{k}`
+replaced by 0 … N-1 (for the limits: 81 menu items, 301 sidebar items).
+
+### The files of 2026-11b
+
+They use the same sections, and a few more:
+
+- `chrome`: parts of `setChrome` (title, menus of action buttons, search, segments, sidebar,
+  undo). `setChrome` has no answer, so `invalid` means: the package warns in development
+  builds (`chromeLimitWarnings`), the app drops the part, and a direct
+  `BMSNative.call('setChrome', …)` is answered `invalid` by the harness.
+- `events`, `menuExpand`: payloads of the calls from the app into the page, grouped by
+  event (`events.search.valid`, …).
+- `menuItems`: what `loadChildren` returns for the lazy item `send` of the second valid
+  menu. Invalid ones are not answered (`error: "unanswered"`).
+- `searchAnswer`: what `onSearch` returns for a page search. `error: "normalized"` means the
+  package sends `sent` instead (51 options cut to 50, an `http` image left out).
+- `fields`: form fields with the new options `live` and `source: "page"`; invalid ones are
+  refused by the Pydantic models (`source: "page"` only belongs to `search`).
+- `update`, `updateResults` (document viewer): `updateDocument` options and results.
 
 Who checks what:
 

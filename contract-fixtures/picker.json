@@ -1,0 +1,173 @@
+{
+  "description": "Pickers (feature pickers): showPicker options and results. Dates are YYYY-MM-DD.",
+  "options": {
+    "valid": [
+      {
+        "name": "a date",
+        "value": {
+          "kind": "date",
+          "title": "Valid until",
+          "value": "2026-11-30",
+          "min": "2026-11-11",
+          "max": "2027-12-31"
+        }
+      },
+      {
+        "name": "a date at an anchor",
+        "value": {
+          "kind": "date",
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          }
+        }
+      },
+      {
+        "name": "options",
+        "value": {
+          "kind": "option",
+          "title": "Unit",
+          "value": "pcs",
+          "options": [
+            {
+              "value": "pcs",
+              "label": "Pieces"
+            },
+            {
+              "value": "pal",
+              "label": "Pallets",
+              "subtitle": "à 48"
+            }
+          ]
+        }
+      },
+      {
+        "name": "200 options",
+        "value": {
+          "kind": "option",
+          "options": {
+            "@repeat": 200,
+            "of": {
+              "value": "v{k}",
+              "label": "Option {k}"
+            }
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "an unknown kind",
+        "value": {
+          "kind": "time"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a date in the wrong format",
+        "value": {
+          "kind": "date",
+          "value": "30.11.2026"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a date that does not exist",
+        "value": {
+          "kind": "date",
+          "min": "2026-02-30"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "201 options",
+        "value": {
+          "kind": "option",
+          "options": {
+            "@repeat": 201,
+            "of": {
+              "value": "v{k}",
+              "label": "Option {k}"
+            }
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "no options",
+        "value": {
+          "kind": "option"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an option without a label",
+        "value": {
+          "kind": "option",
+          "options": [
+            {
+              "value": "a"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an anchor with a string",
+        "value": {
+          "kind": "date",
+          "anchor": {
+            "x": "1",
+            "y": 2,
+            "width": 3,
+            "height": 4
+          }
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "a date",
+        "value": {
+          "ok": true,
+          "value": "2026-12-01"
+        }
+      },
+      {
+        "name": "dismissed",
+        "value": {
+          "ok": false,
+          "error": "cancelled"
+        }
+      },
+      {
+        "name": "not available",
+        "value": {
+          "ok": false,
+          "error": "unavailable"
+        }
+      },
+      {
+        "name": "no customChrome capability",
+        "value": {
+          "ok": false,
+          "error": "capability"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "ok without a value",
+        "value": {
+          "ok": true
+        },
+        "error": "failed"
+      }
+    ]
+  }
+}

@@ -34,6 +34,7 @@ from bmsdna.app_native import send_push, create_ingest_router
 - [create_notification_action_router() — receiving interactive push buttons](#create_notification_action_router--receiving-interactive-push-buttons)
 - [Dashboard widgets: feed, actions, `send_widget_update()`](#dashboard-widgets-feed-actions-send_widget_update)
 - [Native forms and content: `NativeForm`, `NativeContent`, uploads, option lookups](#native-forms-and-content-nativeform-nativecontent-uploads-option-lookups)
+- [Menus and page search results: `NativeMenu`, `SurfaceSearchOption`](#menus-and-page-search-results-nativemenu-surfacesearchoption)
 - [Live Activities: `send_live_activity_update()` & co.](#live-activities-send_live_activity_update--co)
 - [Approvals: `create_approvals_router()`, `send_approvals_update()`](#approvals-create_approvals_router-send_approvals_update)
 - [Urgent pushes and critical alerts: `send_critical_alert()`](#urgent-pushes-and-critical-alerts-send_critical_alert)
@@ -524,6 +525,38 @@ reference is client input), and **delete uploads that no request ever names**
 after a while (a TTL, for example 24 hours): a user who adds a photo and drops
 the form leaves a file behind. The in-memory `_UploadStore` in
 [`example/main.py`](example/main.py) shows the pattern.
+
+## Menus and page search results: `NativeMenu`, `SurfaceSearchOption`
+
+For backends that build menus or search results server-side. The page passes them to
+`showMenu` or answers a search field with `source: "page"`; no router is involved.
+
+```python
+from bmsdna.app_native import (
+    MenuItem,
+    MenuSection,
+    NativeMenu,
+    SurfaceSearchAnswer,
+    SurfaceSearchOption,
+)
+
+
+@app.get(
+    "/api/offers/{offer_id}/menu", response_model_by_alias=True, response_model_exclude_none=True
+)
+async def offer_menu(offer_id: str) -> NativeMenu:
+    return NativeMenu(sections=[MenuSection(items=[MenuItem(id="open", label="Open")])])
+```
+
+`NativeMenu` / `MenuSection` / `MenuItem` check the limits of the app: submenus at most 2
+levels below the root, at most 80 items in total, labels of at most 80 characters, ids
+unique (`check_menu_sections` checks the sections that answer a lazy item).
+`SurfaceSearchOption` is one result of a search field (`value`, `label`, `subtitle`,
+`image` as `https` or a `data:` URI of at most 100 KB); `SurfaceSearchAnswer` is what the
+page sends back, at most 50 of them. `ActionField` has the new options `live` and
+`source="page"` (type `search` only), content blocks and list items an `id`. Details:
+[menus-and-alerts-guide.md](../../docs/menus-and-alerts-guide.md),
+[native-surfaces-guide.md](../../docs/native-surfaces-guide.md#live-surfaces).
 
 ## Live Activities: `send_live_activity_update()` & co.
 

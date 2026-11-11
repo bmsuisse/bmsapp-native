@@ -1,0 +1,170 @@
+{
+  "description": "The search field in the navigation bar (feature navSearch): `setChrome({ search })` and its events.",
+  "chrome": {
+    "valid": [
+      {
+        "name": "a plain field",
+        "value": {
+          "search": {
+            "id": "offers",
+            "placeholder": "Search offers"
+          }
+        }
+      },
+      {
+        "name": "with a value",
+        "value": {
+          "search": {
+            "id": "offers",
+            "placeholder": "Search",
+            "value": "Müller"
+          }
+        }
+      },
+      {
+        "name": "with scopes",
+        "value": {
+          "search": {
+            "id": "offers",
+            "placeholder": "Search",
+            "scopes": [
+              {
+                "id": "all",
+                "label": "All"
+              },
+              {
+                "id": "mine",
+                "label": "Mine"
+              }
+            ],
+            "scope": "mine"
+          }
+        }
+      },
+      {
+        "name": "with the scan button",
+        "value": {
+          "search": {
+            "id": "articles",
+            "placeholder": "Article",
+            "barcode": true
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no id",
+        "value": {
+          "search": {
+            "placeholder": "Search"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "no placeholder",
+        "value": {
+          "search": {
+            "id": "offers"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a scope that is not listed",
+        "value": {
+          "search": {
+            "id": "o",
+            "placeholder": "s",
+            "scopes": [
+              {
+                "id": "all",
+                "label": "All"
+              }
+            ],
+            "scope": "mine"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "scopes with the same id",
+        "value": {
+          "search": {
+            "id": "o",
+            "placeholder": "s",
+            "scopes": [
+              {
+                "id": "a",
+                "label": "A"
+              },
+              {
+                "id": "a",
+                "label": "B"
+              }
+            ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "barcode is a string",
+        "value": {
+          "search": {
+            "id": "o",
+            "placeholder": "s",
+            "barcode": "yes"
+          }
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "events": {
+    "search": {
+      "valid": [
+        {
+          "name": "typing",
+          "value": {
+            "id": "offers",
+            "query": "mül",
+            "scope": "all",
+            "submitted": false,
+            "source": "typing"
+          }
+        },
+        {
+          "name": "the Search key",
+          "value": {
+            "id": "offers",
+            "query": "müller",
+            "scope": "all",
+            "submitted": true,
+            "source": "submit"
+          }
+        },
+        {
+          "name": "a scanned code",
+          "value": {
+            "id": "articles",
+            "query": "4006381333931",
+            "scope": null,
+            "submitted": true,
+            "source": "barcode"
+          }
+        }
+      ]
+    },
+    "searchCancel": {
+      "valid": [
+        {
+          "name": "cancelled",
+          "value": {
+            "id": "offers"
+          }
+        }
+      ]
+    }
+  }
+}

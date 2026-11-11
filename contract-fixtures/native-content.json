@@ -21,7 +21,7 @@
       "data": "data:image/png;base64,iVBORw0KGgo=",
       "shape": "circle"
     },
-    { "type": "heading", "text": "Overview", "level": 2, "icon": "building.2" },
+    { "type": "heading", "id": "overview", "text": "Overview", "level": 2, "icon": "building.2" },
     {
       "type": "badges",
       "items": [{ "text": "Key account", "tint": "#2e4a62", "icon": "star" }, { "text": "Zurich" }]
@@ -93,8 +93,10 @@
     },
     {
       "type": "list",
+      "id": "contacts",
       "items": [
         {
+          "id": "contact-1",
           "title": "Anna Muster",
           "subtitle": "Purchasing",
           "trailing": "Main contact",

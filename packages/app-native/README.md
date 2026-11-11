@@ -51,6 +51,14 @@ import {
   getLayout,
   keyboardHeight,
   onBackRequested,
+  showMenu,
+  showAlert,
+  showPicker,
+  anchorOf,
+  updateSurface,
+  setKeyboardToolbar,
+  setKeyCommands,
+  showDocument,
 } from '@bmsuisse/app-native'
 
 // Is the page running in the app? Does it have a given capability?
@@ -107,6 +115,42 @@ on('layoutChange', () => chat.scrollToBottom())
 
 // Take over the back button while a dialog is open
 const stopBack = onBackRequested((source) => (dialogOpen ? (closeDialog(), true) : false))
+
+// Native menus, alerts, toasts with an action and pickers instead of the page's own
+// popovers (docs/menus-and-alerts-guide.md). Each is `unavailable` where the app lacks it:
+// keep your own UI for that case, there is no window.confirm fallback.
+const picked = await showMenu({
+  anchor: anchorOf(button),
+  sections: [{ items: [{ id: 'open', label: 'Open' }] }],
+})
+const sure = await showAlert({
+  title: 'Delete?',
+  actions: [
+    { id: 'no', label: 'Cancel', style: 'cancel' },
+    { id: 'yes', label: 'Delete', style: 'destructive' },
+  ],
+})
+await toast('Deleted', { action: { id: 'undo', label: 'Undo' }, onAction: () => restore() })
+const day = await showPicker({ kind: 'date', value: '2026-11-30' })
+
+// The header, drawn natively: title menu, search field, segments, iPad sidebar, undo
+setChrome({
+  title: { text: 'Offer 4711' },
+  search: { id: 'q', placeholder: 'Search' },
+  undo: { canUndo: true, canRedo: false },
+})
+on('search', ({ query, source }) => find(query))
+await setKeyboardToolbar({ items: [{ id: 'add', label: 'Add line' }], done: true })
+await setKeyCommands({
+  commands: [{ id: 'search', input: 'k', modifiers: ['command'], title: 'Search' }],
+})
+
+// A native PDF viewer with highlights; a form that updates and searches live
+await showDocument({ id: 'pdf', url: '/api/offers/4711/file', highlights: [] })
+await showForm(def, {
+  onChange: (field, value) => update(field, value),
+  onSearch: async (field, q) => find(q),
+})
 
 // Widgets on the native dashboard
 await setWidgets([{ id: 'open-orders', kind: 'kpi', title: 'Open', data: { value: 12 } }])
@@ -177,7 +221,7 @@ Common errors: `capability` (the app has not granted the capability to the
 web app), `invalid`, `cancelled`, `unavailable`, `notConfigured`; for
 `getAccessToken` also `forbidden` and `notSignedIn`; for the device actions also
 `denied`; for `showForm`/`showContent` also `forbidden`, `busy` and `tooLarge`; for
-`getAccessToken({ resource })` also `consentRequired`; for documents `tooLarge` (per
+`getAccessToken({ resource })` also `consentRequired`; for the 2026-11b calls `notFound` (`updateSurface`, `updateDocument`) and `busy` (`showMenu`); for documents `tooLarge` (per
 document, beyond 25,000,000 bytes).
 An app that predates a call answers `unknownAction`: treat it like `unavailable`. The
 calls of the 2026-11 contract (`pickFiles`, `dictate`, `getLayout`, `previewFile`,
@@ -192,28 +236,30 @@ own.
 
 ## Overview
 
-| Area            | Functions                                                                                                                                | Capability                                                             |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Detection       | `isNativeApp`, `nativeInfo`, `can`                                                                                                       | –                                                                      |
-| Detection       | `hasFeature`, `FEATURES` (what the app implements, see [chrome guide](../../docs/webapp-chrome-guide.md))                                | –                                                                      |
-| Events          | `on('menuSelect' \| 'actionButtonTap' \| 'bottomBarTap' \| 'barcodeScanned' \| 'barcodesScanned' \| 'textScanned' \| 'layoutChange', …)` | –                                                                      |
-| Chrome          | `setChrome`, `centerProminentEntry`                                                                                                      | `customChrome`, `customBottomBar`                                      |
-| Feedback        | `toast`, `haptic`, `setBadge`                                                                                                            | –                                                                      |
-| System          | `share`, `openExternal`, `biometricConfirm`                                                                                              | –                                                                      |
-| Camera          | `scanDocument`, `scanBarcode`, `scanBarcodes`, `scanText`, `canScan` ([guide](../../docs/scan-guide.md))                                 | `camera`                                                               |
-| Documents       | `pickFiles`, `onDocumentsReceived`, `consumeReceivedDocuments`, `previewFile` ([guide](../../docs/documents-guide.md))                   | `camera` (source camera), `receiveDocuments`                           |
-| Voice           | `dictate` ([guide](../../docs/voice-guide.md))                                                                                           | `microphone`                                                           |
-| Layout, back    | `getLayout`, `keyboardHeight`, `on('layoutChange', …)`, `onBackRequested` ([guide](../../docs/webapp-chrome-guide.md))                   | –                                                                      |
-| Widgets         | `setWidgets`, `updateWidget`, `removeWidgets`, `refreshWidgets`                                                                          | `dashboardWidgets`                                                     |
-| Live Activities | `startLiveActivity`, `updateLiveActivity`, `endLiveActivity`, `getLiveActivities`                                                        | `liveActivities`                                                       |
-| Approvals       | `refreshApprovals`                                                                                                                       | `approvals`                                                            |
-| Sign-in         | `getAccessToken` (also `{ resource, interactive }` for another API, [guide](../../docs/entra-token-guide.md))                            | `identity`                                                             |
-| Other apps      | `navigate`, `callPhone`, `addReminder`, `saveContact`, `toIsoWithOffset`                                                                 | `deviceApps` (reminder, contact)                                       |
-| Native forms    | `showForm`, `canShowNativeForms`, `formLimitWarnings`                                                                                    | `nativeForms` (+ `camera` for camera fields)                           |
-| Native content  | `showContent`, `canShowNativeContent`, `contentLimitWarnings`                                                                            | `nativeContent` (+ `deviceApps` for `saveContact`/`addReminder` steps) |
-| Surfaces        | `closeSurface`, `surfaceResult`, `isNativeSurfaceUnsupported`, `on('surfaceAction', …)`, `onSurfaceAction`                               | `nativeForms` or `nativeContent`                                       |
-| Testing         | `sendTestNotification`                                                                                                                   | `notifications`                                                        |
-| Raw access      | `call`, `post`, `send`                                                                                                                   | –                                                                      |
+| Area            | Functions                                                                                                                                                                                                      | Capability                                                             |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Detection       | `isNativeApp`, `nativeInfo`, `can`                                                                                                                                                                             | –                                                                      |
+| Detection       | `hasFeature`, `FEATURES` (what the app implements, see [chrome guide](../../docs/webapp-chrome-guide.md))                                                                                                      | –                                                                      |
+| Events          | `on('menuSelect' \| 'actionButtonTap' \| 'bottomBarTap' \| 'barcodeScanned' \| 'barcodesScanned' \| 'textScanned' \| 'layoutChange', …)`                                                                       | –                                                                      |
+| Chrome          | `setChrome`, `centerProminentEntry`                                                                                                                                                                            | `customChrome`, `customBottomBar`                                      |
+| Feedback        | `toast`, `haptic`, `setBadge`                                                                                                                                                                                  | –                                                                      |
+| System          | `share`, `openExternal`, `biometricConfirm`                                                                                                                                                                    | –                                                                      |
+| Menus, alerts   | `showMenu`, `anchorOf`, `showAlert`, `showPicker`, `toast(…, { action })` ([guide](../../docs/menus-and-alerts-guide.md))                                                                                      | `customChrome`                                                         |
+| Header          | `setChrome({ title, search, segments, sidebar, undo, actionButtons[].menu })`, `setKeyboardToolbar`, `setKeyCommands` ([guide](../../docs/webapp-chrome-guide.md#title-search-segments-sidebar-undo-2026-11b)) | `customChrome`                                                         |
+| Camera          | `scanDocument`, `scanBarcode`, `scanBarcodes`, `scanText`, `canScan` ([guide](../../docs/scan-guide.md))                                                                                                       | `camera`                                                               |
+| Documents       | `pickFiles`, `onDocumentsReceived`, `consumeReceivedDocuments`, `previewFile` ([guide](../../docs/documents-guide.md))                                                                                         | `camera` (source camera), `receiveDocuments`                           |
+| Voice           | `dictate` ([guide](../../docs/voice-guide.md))                                                                                                                                                                 | `microphone`                                                           |
+| Layout, back    | `getLayout`, `keyboardHeight`, `on('layoutChange', …)`, `onBackRequested` ([guide](../../docs/webapp-chrome-guide.md))                                                                                         | –                                                                      |
+| Widgets         | `setWidgets`, `updateWidget`, `removeWidgets`, `refreshWidgets`                                                                                                                                                | `dashboardWidgets`                                                     |
+| Live Activities | `startLiveActivity`, `updateLiveActivity`, `endLiveActivity`, `getLiveActivities`                                                                                                                              | `liveActivities`                                                       |
+| Approvals       | `refreshApprovals`                                                                                                                                                                                             | `approvals`                                                            |
+| Sign-in         | `getAccessToken` (also `{ resource, interactive }` for another API, [guide](../../docs/entra-token-guide.md))                                                                                                  | `identity`                                                             |
+| Other apps      | `navigate`, `callPhone`, `addReminder`, `saveContact`, `toIsoWithOffset`                                                                                                                                       | `deviceApps` (reminder, contact)                                       |
+| Native forms    | `showForm`, `canShowNativeForms`, `formLimitWarnings`                                                                                                                                                          | `nativeForms` (+ `camera` for camera fields)                           |
+| Native content  | `showContent`, `canShowNativeContent`, `contentLimitWarnings`                                                                                                                                                  | `nativeContent` (+ `deviceApps` for `saveContact`/`addReminder` steps) |
+| Surfaces        | `closeSurface`, `surfaceResult`, `isNativeSurfaceUnsupported`, `on('surfaceAction', …)`, `onSurfaceAction`                                                                                                     | `nativeForms` or `nativeContent`                                       |
+| Testing         | `sendTestNotification`                                                                                                                                                                                         | `notifications`                                                        |
+| Raw access      | `call`, `post`, `send`                                                                                                                                                                                         | –                                                                      |
 
 ## License
 
