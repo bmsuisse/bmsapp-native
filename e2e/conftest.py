@@ -24,6 +24,15 @@ def browser_context_args(browser_context_args: dict) -> dict:
     return {**browser_context_args, "timezone_id": "Europe/Zurich"}
 
 
+@pytest.fixture(scope="session")
+def browser_type_launch_args(browser_type_launch_args: dict) -> dict:
+    # A fake microphone and no permission prompt: the page's fake bridge decides,
+    # like the app, whether `getUserMedia({ audio: true })` is granted.
+    args = [*browser_type_launch_args.get("args", [])]
+    args += ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
+    return {**browser_type_launch_args, "args": args}
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _build_package() -> None:
     # Tests run against the built package (dist/), exactly what gets published.

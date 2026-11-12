@@ -30,10 +30,11 @@ from bmsdna.app_native import send_push, create_ingest_router
 - [Cleaning up dead device tokens](#cleaning-up-dead-device-tokens)
 - [send_silent_push() — silent push (background refresh)](#send_silent_push--silent-push-background-refresh)
 - [create_ingest_router() — receiving device tokens + location](#create_ingest_router--receiving-device-tokens--location)
-- [create_document_router() — receiving file uploads (scans)](#create_document_router--receiving-file-uploads-scans)
+- [create_document_router() — receiving file uploads (scans, picks, shared files)](#create_document_router--receiving-file-uploads-scans-picks-shared-files)
 - [create_notification_action_router() — receiving interactive push buttons](#create_notification_action_router--receiving-interactive-push-buttons)
 - [Dashboard widgets: feed, actions, `send_widget_update()`](#dashboard-widgets-feed-actions-send_widget_update)
 - [Native forms and content: `NativeForm`, `NativeContent`, uploads, option lookups](#native-forms-and-content-nativeform-nativecontent-uploads-option-lookups)
+- [Menus and page search results: `NativeMenu`, `SurfaceSearchOption`](#menus-and-page-search-results-nativemenu-surfacesearchoption)
 - [Live Activities: `send_live_activity_update()` & co.](#live-activities-send_live_activity_update--co)
 - [Approvals: `create_approvals_router()`, `send_approvals_update()`](#approvals-create_approvals_router-send_approvals_update)
 - [Urgent pushes and critical alerts: `send_critical_alert()`](#urgent-pushes-and-critical-alerts-send_critical_alert)
@@ -211,7 +212,7 @@ app (weekdays + time of day, default Mon–Fri 07:00–18:00). Outside of these,
 so a gap in the data does not necessarily mean that the device is offline
 or the permission is missing.
 
-## `create_document_router()` — receiving file uploads (scans)
+## `create_document_router()` — receiving file uploads (scans, picks, shared files)
 
 ```python
 from bmsdna.app_native import ReceivedDocument, WidgetRequestContext, create_document_router
@@ -237,13 +238,47 @@ app.include_router(
 | `POST <prefix>/documents` | `multipart/form-data` | `on_document_received` |
 
 Form fields: `file` (required), `device_id` (required), `user_email`
-(optional), `kind` (optional, a free-form distinguishing attribute such as
-`"scan"`/`"signature"`/`"receipt"`). The media of **native forms** arrive here
-too, with `kind="form"` and four more fields: `upload_id` (a UUID per file, the
-same one again after a failed attempt), `form_id`, `field_id` and `context`
-(JSON text). They are in `doc.metadata` (`context` already parsed; text that is
-not a JSON object is answered with 422). Details in the
-[native forms section](#native-forms-and-content-nativeform-nativecontent-uploads-option-lookups).
+(optional), `kind` (optional, a distinguishing attribute), `upload_id` (a UUID per
+file, the same one again when the app retries), `context` (JSON text) and, for native
+forms, `form_id` and `field_id`. They are in `doc.metadata` (`context` already
+parsed; text that is not a JSON object is answered with 422).
+
+The app uploads here with these kinds: `"scan"` (`scanDocument`), `"pick"`
+(`pickFiles`), `"shared"` (files shared into the web app from other apps, without
+`context`), `"form"` (the media of **native forms**, see the
+[native forms section](#native-forms-and-content-nativeform-nativecontent-uploads-option-lookups))
+and any `kind` a web app asks for (`a-z0-9_-`, 1 to 32 characters). The router
+accepts every kind and leaves the decision to your callback.
+
+**Retries.** The app repeats an upload with the same `upload_id` after a network error
+or an HTTP 5xx, for **every** kind, and the first attempt may have succeeded. Make the
+callback idempotent per `upload_id`, or let the router do it:
+
+```python
+from bmsdna.app_native import InMemoryUploadResults
+
+create_document_router(
+    on_document_received=on_document_received,
+    auth_dependency=require_user,
+    upload_results=InMemoryUploadResults(),  # one process; implement UploadResultStore for more
+)
+```
+
+A repeated `upload_id` is then answered with the answer of the first time and the
+callback is not called again. Only successful answers are remembered.
+
+**The response reaches the page.** The app hands the JSON response to the web app
+verbatim as `upload.body` of its `NativeDocument`, error responses included. Keep
+secrets (tokens, signed URLs with credentials) out of what the callback returns and out
+of error details.
+
+**Pick results relayed by the page.** `NativeDocument` is the model of what
+`scanDocument`/`pickFiles` deliver to the page (`name`, `mime`, `size`, `uploadId`,
+`upload`, `data`, `error`, …). Use it in the request body of your own endpoint; it
+checks the shape of the contract and `doc.content()` decodes `data`.
+`NativeDocumentContext` (a JSON object of at most 4096 bytes serialized) and
+`DocumentKind` (`a-z0-9_-`, 1 to 32 characters) are the types for `context` and
+`kind`. Details: [documents-guide.md](../../docs/documents-guide.md).
 
 `ReceivedDocument` (not a Pydantic model but a `dataclass` — it contains raw
 bytes that do not go through JSON):
@@ -251,7 +286,7 @@ bytes that do not go through JSON):
 ```python
 @dataclass
 class ReceivedDocument:
-    metadata: DocumentMetadata  # device_id, user_email, kind, upload_id, form_id, field_id, context
+    metadata: DocumentMetadata  # device_id, user_email, kind, upload_id, context, form_id, field_id
     filename: str  # base name only, `../` parts are stripped
     content_type: str
     data: bytes
@@ -266,7 +301,8 @@ the `upload_id`.
 Triggered when the web app in the WebView calls
 `window.webkit.messageHandlers.nativeBridge.postMessage({action: "scanDocument"})`
 (opens the native VisionKit document scanner), or
-`scanDocument()` from `@bmsuisse/app-native`.
+`scanDocument()` from `@bmsuisse/app-native`; likewise `pickFiles({ mode: 'upload' })`
+and files shared into the web app.
 
 ## `create_notification_action_router()` — receiving interactive push buttons
 
@@ -489,6 +525,38 @@ reference is client input), and **delete uploads that no request ever names**
 after a while (a TTL, for example 24 hours): a user who adds a photo and drops
 the form leaves a file behind. The in-memory `_UploadStore` in
 [`example/main.py`](example/main.py) shows the pattern.
+
+## Menus and page search results: `NativeMenu`, `SurfaceSearchOption`
+
+For backends that build menus or search results server-side. The page passes them to
+`showMenu` or answers a search field with `source: "page"`; no router is involved.
+
+```python
+from bmsdna.app_native import (
+    MenuItem,
+    MenuSection,
+    NativeMenu,
+    SurfaceSearchAnswer,
+    SurfaceSearchOption,
+)
+
+
+@app.get(
+    "/api/offers/{offer_id}/menu", response_model_by_alias=True, response_model_exclude_none=True
+)
+async def offer_menu(offer_id: str) -> NativeMenu:
+    return NativeMenu(sections=[MenuSection(items=[MenuItem(id="open", label="Open")])])
+```
+
+`NativeMenu` / `MenuSection` / `MenuItem` check the limits of the app: submenus at most 2
+levels below the root, at most 80 items in total, labels of at most 80 characters, ids
+unique (`check_menu_sections` checks the sections that answer a lazy item).
+`SurfaceSearchOption` is one result of a search field (`value`, `label`, `subtitle`,
+`image` as `https` or a `data:` URI of at most 100 KB); `SurfaceSearchAnswer` is what the
+page sends back, at most 50 of them. `ActionField` has the new options `live` and
+`source="page"` (type `search` only), content blocks and list items an `id`. Details:
+[menus-and-alerts-guide.md](../../docs/menus-and-alerts-guide.md),
+[native-surfaces-guide.md](../../docs/native-surfaces-guide.md#live-surfaces).
 
 ## Live Activities: `send_live_activity_update()` & co.
 

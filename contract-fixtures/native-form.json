@@ -44,7 +44,7 @@
       "title": "Contact",
       "text": "How do we reach them?",
       "fields": [
-        { "id": "email", "type": "email", "label": "Email", "required": true },
+        { "id": "email", "type": "email", "label": "Email", "required": true, "live": true },
         { "id": "phone", "type": "phone", "label": "Phone" },
         {
           "id": "website",
@@ -57,6 +57,7 @@
           "type": "search",
           "label": "Account manager",
           "minQueryLength": 2,
+          "source": "page",
           "value": "u-1",
           "valueLabel": "Anna Muster"
         },

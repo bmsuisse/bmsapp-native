@@ -1,0 +1,921 @@
+{
+  "description": "Menus (feature menus, titleMenu): showMenu options and results, the lazy submenu round trip, and the menus of action buttons and the title.",
+  "options": {
+    "valid": [
+      {
+        "name": "a simple menu",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "open",
+                  "label": "Open"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "every property, two levels of submenus and a lazy item",
+        "value": {
+          "id": "offer-menu",
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "preview": {
+            "title": "Offer 4711",
+            "subtitle": "Müller AG"
+          },
+          "sections": [
+            {
+              "title": "Offer",
+              "items": [
+                {
+                  "id": "open",
+                  "label": "Open",
+                  "subtitle": "In the editor",
+                  "icon": "doc"
+                },
+                {
+                  "id": "pinned",
+                  "label": "Pinned",
+                  "checked": true
+                },
+                {
+                  "id": "archive",
+                  "label": "Archive",
+                  "disabled": true
+                },
+                {
+                  "id": "export",
+                  "label": "Export as …",
+                  "children": [
+                    {
+                      "items": [
+                        {
+                          "id": "pdf",
+                          "label": "PDF"
+                        },
+                        {
+                          "id": "more",
+                          "label": "More",
+                          "children": [
+                            {
+                              "items": [
+                                {
+                                  "id": "xml",
+                                  "label": "XML"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "send",
+                  "label": "Send to …",
+                  "children": "lazy",
+                  "lazyFailedLabel": "Could not load"
+                }
+              ]
+            },
+            {
+              "items": [
+                {
+                  "id": "delete",
+                  "label": "Delete",
+                  "icon": "trash",
+                  "destructive": true
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "exactly 80 items",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": {
+                "@repeat": 80,
+                "of": {
+                  "id": "i{k}",
+                  "label": "Item {k}"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "a label of exactly 80 characters",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "@80"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "anchor missing",
+        "value": {
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "anchor x is a string",
+        "value": {
+          "anchor": {
+            "x": "24",
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "81 items",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": {
+                "@repeat": 81,
+                "of": {
+                  "id": "i{k}",
+                  "label": "Item {k}"
+                }
+              }
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a label of 81 characters",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "@81"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an id used twice",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A"
+                },
+                {
+                  "id": "a",
+                  "label": "B"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an id used twice at different levels",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "children": [
+                    {
+                      "items": [
+                        {
+                          "id": "a",
+                          "label": "B"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "submenus three levels deep",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "children": [
+                    {
+                      "items": [
+                        {
+                          "id": "b",
+                          "label": "B",
+                          "children": [
+                            {
+                              "items": [
+                                {
+                                  "id": "c",
+                                  "label": "C",
+                                  "children": [
+                                    {
+                                      "items": [
+                                        {
+                                          "id": "d",
+                                          "label": "D"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an item without id",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "label": "A"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "children neither sections nor lazy",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "children": "eager"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "preview without title",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "preview": {
+            "subtitle": "x"
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "sections is not a list",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": {
+            "items": []
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an empty menu",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": []
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an empty section",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": []
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "children that is an empty list",
+        "value": {
+          "anchor": {
+            "x": 24,
+            "y": 120,
+            "width": 44,
+            "height": 44
+          },
+          "sections": [
+            {
+              "items": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "an item was chosen",
+        "value": {
+          "ok": true,
+          "id": "open"
+        }
+      },
+      {
+        "name": "dismissed",
+        "value": {
+          "ok": false,
+          "error": "cancelled"
+        }
+      },
+      {
+        "name": "a menu is already open",
+        "value": {
+          "ok": false,
+          "error": "busy"
+        }
+      },
+      {
+        "name": "no customChrome capability",
+        "value": {
+          "ok": false,
+          "error": "capability"
+        }
+      },
+      {
+        "name": "not available",
+        "value": {
+          "ok": false,
+          "error": "unavailable"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "ok without an id",
+        "value": {
+          "ok": true
+        },
+        "error": "failed"
+      }
+    ]
+  },
+  "menuExpand": {
+    "valid": [
+      {
+        "name": "the user opened a lazy item",
+        "value": {
+          "menuId": "offer-menu",
+          "itemId": "send",
+          "requestId": "r-1"
+        }
+      }
+    ]
+  },
+  "menuItems": {
+    "description": "What loadChildren returns for the lazy item `send` (root level, so its children are level 1). Valid ones are sent as menuItems; invalid ones are not answered (error: unanswered).",
+    "valid": [
+      {
+        "name": "two sections",
+        "value": [
+          {
+            "title": "Recent",
+            "items": [
+              {
+                "id": "anna",
+                "label": "Anna Muster"
+              }
+            ]
+          },
+          {
+            "items": [
+              {
+                "id": "other",
+                "label": "Other …"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "one level deeper",
+        "value": [
+          {
+            "items": [
+              {
+                "id": "grp",
+                "label": "Group",
+                "children": [
+                  {
+                    "items": [
+                      {
+                        "id": "g1",
+                        "label": "G1"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "invalid": [
+      {
+        "name": "an id the menu already has",
+        "value": [
+          {
+            "items": [
+              {
+                "id": "open",
+                "label": "Open"
+              }
+            ]
+          }
+        ],
+        "error": "unanswered"
+      },
+      {
+        "name": "more than 80 items together",
+        "value": [
+          {
+            "items": {
+              "@repeat": 80,
+              "of": {
+                "id": "n{k}",
+                "label": "N {k}"
+              }
+            }
+          }
+        ],
+        "error": "unanswered"
+      },
+      {
+        "name": "nested beyond the second level",
+        "value": [
+          {
+            "items": [
+              {
+                "id": "x1",
+                "label": "X1",
+                "children": [
+                  {
+                    "items": [
+                      {
+                        "id": "x2",
+                        "label": "X2",
+                        "children": [
+                          {
+                            "items": [
+                              {
+                                "id": "x3",
+                                "label": "X3"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "error": "unanswered"
+      },
+      {
+        "name": "not a list of sections",
+        "value": {
+          "items": []
+        },
+        "error": "unanswered"
+      },
+      {
+        "name": "an empty list",
+        "value": [],
+        "error": "unanswered"
+      }
+    ]
+  },
+  "chrome": {
+    "description": "Parts of setChrome. Invalid parts: the package warns in development builds and the app drops them (a harness `call('setChrome')` answers invalid).",
+    "valid": [
+      {
+        "name": "an action button with a pull-down menu",
+        "value": {
+          "actionButtons": [
+            {
+              "id": "more",
+              "icon": "ellipsis.circle",
+              "menu": [
+                {
+                  "items": [
+                    {
+                      "id": "share",
+                      "label": "Share",
+                      "icon": "square.and.arrow.up"
+                    },
+                    {
+                      "id": "delete",
+                      "label": "Delete",
+                      "destructive": true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "a title with subtitle and title menu",
+        "value": {
+          "title": {
+            "text": "Offer 4711",
+            "subtitle": "Müller AG",
+            "menu": [
+              {
+                "items": [
+                  {
+                    "id": "rename",
+                    "label": "Rename"
+                  },
+                  {
+                    "id": "dup",
+                    "label": "Duplicate"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "a title without a menu",
+        "value": {
+          "title": {
+            "text": "Offers"
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "an action button menu with 81 items",
+        "value": {
+          "actionButtons": [
+            {
+              "id": "more",
+              "icon": "ellipsis",
+              "menu": [
+                {
+                  "items": {
+                    "@repeat": 81,
+                    "of": {
+                      "id": "i{k}",
+                      "label": "Item {k}"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an action button menu with a duplicate id",
+        "value": {
+          "actionButtons": [
+            {
+              "id": "more",
+              "icon": "ellipsis",
+              "menu": [
+                {
+                  "items": [
+                    {
+                      "id": "a",
+                      "label": "A"
+                    },
+                    {
+                      "id": "a",
+                      "label": "B"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a title without text",
+        "value": {
+          "title": {
+            "subtitle": "x"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a title menu three levels deep",
+        "value": {
+          "title": {
+            "text": "T",
+            "menu": [
+              {
+                "items": [
+                  {
+                    "id": "a",
+                    "label": "A",
+                    "children": [
+                      {
+                        "items": [
+                          {
+                            "id": "b",
+                            "label": "B",
+                            "children": [
+                              {
+                                "items": [
+                                  {
+                                    "id": "c",
+                                    "label": "C",
+                                    "children": [
+                                      {
+                                        "items": [
+                                          {
+                                            "id": "d",
+                                            "label": "D"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a title menu with a lazy item",
+        "value": {
+          "title": {
+            "text": "T",
+            "menu": [
+              {
+                "items": [
+                  {
+                    "id": "a",
+                    "label": "A",
+                    "children": "lazy"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an action button menu with a lazy item",
+        "value": {
+          "actionButtons": [
+            {
+              "id": "m",
+              "icon": "ellipsis",
+              "menu": [
+                {
+                  "items": [
+                    {
+                      "id": "a",
+                      "label": "A",
+                      "children": "lazy"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an empty title menu",
+        "value": {
+          "title": {
+            "text": "T",
+            "menu": []
+          }
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "events": {
+    "actionButtonMenuSelect": {
+      "valid": [
+        {
+          "name": "a selection",
+          "value": {
+            "buttonId": "more",
+            "id": "share"
+          }
+        }
+      ]
+    },
+    "titleMenuSelect": {
+      "valid": [
+        {
+          "name": "a selection",
+          "value": {
+            "id": "rename"
+          }
+        }
+      ]
+    }
+  }
+}

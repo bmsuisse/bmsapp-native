@@ -1,0 +1,514 @@
+{
+  "description": "Live surfaces (features liveSurfaces, pageSearch): updateSurface, live fields, search fields answered by the page.",
+  "options": {
+    "description": "updateSurface(options). Limits of the definition are the limits of showForm/showContent (warned about in development builds, enforced by the app: tooLarge); these cases are the structural ones.",
+    "valid": [
+      {
+        "name": "new blocks with ids",
+        "value": {
+          "id": "offer",
+          "title": "Offer 4711",
+          "subtitle": "3 lines",
+          "blocks": [
+            {
+              "type": "heading",
+              "id": "h",
+              "text": "Lines"
+            },
+            {
+              "type": "list",
+              "id": "lines",
+              "items": [
+                {
+                  "id": "l1",
+                  "title": "Pallet",
+                  "trailing": "12"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "only the values of a form",
+        "value": {
+          "id": "f",
+          "values": {
+            "qty": 3
+          }
+        }
+      },
+      {
+        "name": "new fields",
+        "value": {
+          "id": "f",
+          "fields": [
+            {
+              "id": "customer",
+              "type": "search",
+              "source": "page",
+              "live": true
+            }
+          ]
+        }
+      },
+      {
+        "name": "new pages",
+        "value": {
+          "id": "f",
+          "pages": [
+            {
+              "title": "Page 1",
+              "fields": [
+                {
+                  "id": "a",
+                  "type": "text",
+                  "live": true
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "new footer actions",
+        "value": {
+          "id": "offer",
+          "actions": [
+            {
+              "id": "save",
+              "label": "Save",
+              "style": "primary"
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no id",
+        "value": {
+          "title": "x"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an empty id",
+        "value": {
+          "id": "",
+          "title": "x"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "blocks is not a list",
+        "value": {
+          "id": "offer",
+          "blocks": {
+            "type": "divider"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "values is not an object",
+        "value": {
+          "id": "f",
+          "values": [1]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "title is a number",
+        "value": {
+          "id": "offer",
+          "title": 3
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "the same field id twice",
+        "value": {
+          "id": "f",
+          "fields": [
+            {
+              "id": "a",
+              "type": "text"
+            },
+            {
+              "id": "a",
+              "type": "text"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "the same block id twice",
+        "value": {
+          "id": "s",
+          "blocks": [
+            {
+              "type": "divider",
+              "id": "x"
+            },
+            {
+              "type": "divider",
+              "id": "x"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "the same list item id twice",
+        "value": {
+          "id": "s",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                {
+                  "id": "l",
+                  "title": "a"
+                },
+                {
+                  "id": "l",
+                  "title": "b"
+                }
+              ]
+            }
+          ]
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "updated",
+        "value": {
+          "ok": true
+        }
+      },
+      {
+        "name": "that surface is not open",
+        "value": {
+          "ok": false,
+          "error": "notFound"
+        }
+      },
+      {
+        "name": "beyond a limit",
+        "value": {
+          "ok": false,
+          "error": "tooLarge"
+        }
+      },
+      {
+        "name": "not available",
+        "value": {
+          "ok": false,
+          "error": "unavailable"
+        }
+      }
+    ],
+    "invalid": []
+  },
+  "fields": {
+    "description": "Form fields with the new options. Invalid ones are refused by the Pydantic models (and by the harness as `invalid`).",
+    "valid": [
+      {
+        "name": "a live text field",
+        "value": {
+          "id": "name",
+          "type": "text",
+          "label": "Name",
+          "live": true
+        }
+      },
+      {
+        "name": "a live select",
+        "value": {
+          "id": "unit",
+          "type": "select",
+          "options": [
+            {
+              "value": "pcs",
+              "label": "Pieces"
+            }
+          ],
+          "live": true
+        }
+      },
+      {
+        "name": "a search field answered by the page",
+        "value": {
+          "id": "customer",
+          "type": "search",
+          "label": "Customer",
+          "source": "page",
+          "minQueryLength": 0
+        }
+      },
+      {
+        "name": "a photo field keeps its own source",
+        "value": {
+          "id": "photo",
+          "type": "photo",
+          "source": "camera"
+        }
+      },
+      {
+        "name": "live: false on a photo field is fine",
+        "value": {
+          "id": "photo",
+          "type": "photo",
+          "live": false
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "source page on a text field",
+        "value": {
+          "id": "name",
+          "type": "text",
+          "source": "page"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "source page on a photo field",
+        "value": {
+          "id": "photo",
+          "type": "photo",
+          "source": "page"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a photo field",
+        "value": {
+          "id": "f",
+          "type": "photo",
+          "live": true
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a scan field",
+        "value": {
+          "id": "f",
+          "type": "scan",
+          "live": true
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a signature field",
+        "value": {
+          "id": "f",
+          "type": "signature",
+          "live": true
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a repeat field",
+        "value": {
+          "id": "f",
+          "type": "repeat",
+          "live": true,
+          "fields": [
+            {
+              "id": "a",
+              "type": "text"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "live on a info field",
+        "value": {
+          "id": "f",
+          "type": "info",
+          "live": true,
+          "value": "x"
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "events": {
+    "surfaceChange": {
+      "valid": [
+        {
+          "name": "a text value",
+          "value": {
+            "id": "f",
+            "fieldId": "name",
+            "value": "Mül"
+          }
+        },
+        {
+          "name": "a number",
+          "value": {
+            "id": "f",
+            "fieldId": "qty",
+            "value": 3
+          }
+        },
+        {
+          "name": "a toggle",
+          "value": {
+            "id": "f",
+            "fieldId": "express",
+            "value": true
+          }
+        },
+        {
+          "name": "a multiselect",
+          "value": {
+            "id": "f",
+            "fieldId": "tags",
+            "value": ["a", "b"]
+          }
+        }
+      ]
+    },
+    "surfaceSearch": {
+      "valid": [
+        {
+          "name": "typing",
+          "value": {
+            "id": "f",
+            "fieldId": "customer",
+            "query": "mü",
+            "requestId": "s-7"
+          }
+        }
+      ]
+    }
+  },
+  "searchAnswer": {
+    "description": "What the handler of `onSearch` returns, and what is sent as `surfaceSearchResult`. Invalid cases are normalized by the package; `sent` is what goes out (error: normalized).",
+    "valid": [
+      {
+        "name": "two results",
+        "value": {
+          "requestId": "s-7",
+          "options": [
+            {
+              "value": "c1",
+              "label": "Müller AG",
+              "subtitle": "Zürich",
+              "image": "https://example.com/c1.png"
+            },
+            {
+              "value": "c2",
+              "label": "Meier GmbH",
+              "image": "data:image/png;base64,iVBORw0KGgo="
+            }
+          ]
+        }
+      },
+      {
+        "name": "no results",
+        "value": {
+          "requestId": "s-8",
+          "options": []
+        }
+      },
+      {
+        "name": "exactly 50 results",
+        "value": {
+          "requestId": "s-9",
+          "options": {
+            "@repeat": 50,
+            "of": {
+              "value": "v{k}",
+              "label": "Option {k}"
+            }
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "51 results are cut to 50",
+        "value": {
+          "requestId": "s-10",
+          "options": {
+            "@repeat": 51,
+            "of": {
+              "value": "v{k}",
+              "label": "Option {k}"
+            }
+          }
+        },
+        "error": "normalized",
+        "sent": {
+          "requestId": "s-10",
+          "options": {
+            "@repeat": 50,
+            "of": {
+              "value": "v{k}",
+              "label": "Option {k}"
+            }
+          }
+        }
+      },
+      {
+        "name": "an image over http is left out",
+        "value": {
+          "requestId": "s-11",
+          "options": [
+            {
+              "value": "c1",
+              "label": "A",
+              "image": "http://example.com/a.png"
+            }
+          ]
+        },
+        "error": "normalized",
+        "sent": {
+          "requestId": "s-11",
+          "options": [
+            {
+              "value": "c1",
+              "label": "A"
+            }
+          ]
+        }
+      },
+      {
+        "name": "an entry without a label is left out",
+        "value": {
+          "requestId": "s-12",
+          "options": [
+            {
+              "value": "c1"
+            },
+            {
+              "value": "c2",
+              "label": "B"
+            }
+          ]
+        },
+        "error": "normalized",
+        "sent": {
+          "requestId": "s-12",
+          "options": [
+            {
+              "value": "c2",
+              "label": "B"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

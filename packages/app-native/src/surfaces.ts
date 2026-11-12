@@ -4,7 +4,7 @@
 // sides; the shared examples in `contract-fixtures/` check that both match.
 // Details: docs/native-surfaces-guide.md
 
-import { call, can, type NativeResult } from './bridge.js'
+import { call, can, hasFeature, type NativeResult } from './bridge.js'
 import type {
   AddReminderPayload,
   CallPhonePayload,
@@ -13,6 +13,7 @@ import type {
 } from './deviceActions.js'
 import { isDevelopment, warn } from './dev.js'
 import { on } from './events.js'
+import { callFeature, isRecord, nonEmptyString } from './internal.js'
 import type { ActionField, ChartData, KpiData, ProgressData, StatsData, Value } from './widgets.js'
 
 // --- Common ------------------------------------------------------------------
@@ -41,6 +42,8 @@ export type NativeSurfaceError =
   | 'unavailable'
   | 'unknownAction'
   | 'failed'
+  /** `updateSurface`: the surface `id` is not open. */
+  | 'notFound'
 
 export type NativeSurfaceFailure = {
   ok: false
@@ -202,6 +205,8 @@ export type NativeFact = {
 }
 
 export type NativeListItem = {
+  /** Lets the app keep scroll position and state when `updateSurface` replaces the blocks. */
+  id?: string
   title: string
   subtitle?: string
   trailing?: Value
@@ -219,7 +224,13 @@ export type NativeTableColumn = {
 
 export type NativeBadge = { text: string; tint?: string; icon?: string }
 
-export type NativeContentBlock =
+/**
+ * Every block may carry an `id`. Where ids persist across `updateSurface`, the app keeps
+ * the scroll position, the focus and the entered values.
+ */
+type BlockId = { id?: string }
+
+export type NativeContentBlock = (
   | { type: 'heading'; text: string; level?: 1 | 2 | 3; icon?: string }
   | {
       type: 'text'
@@ -284,6 +295,8 @@ export type NativeContentBlock =
   | { type: 'row'; blocks: NativeContentBlock[] }
   | { type: 'divider' }
   | { type: 'spacer'; height?: number }
+) &
+  BlockId
 
 export type NativeContentDef = NativeSurfaceCommon & {
   subtitle?: string
@@ -450,6 +463,7 @@ export function formLimitWarnings(def: NativeFormDef): string[] {
     )
   }
   if (def.fields && def.pages) warnings.push('Use either `fields` or `pages`, not both.')
+  warnings.push(...idWarnings({ fields: def.fields, pages: def.pages }))
   const pages = def.pages ?? []
   if (pages.length > limits.formPages) {
     warnings.push(`${pages.length} pages, the app takes at most ${limits.formPages}.`)
@@ -618,6 +632,7 @@ export function contentLimitWarnings(def: NativeContentDef): string[] {
       `The definition is ${bytes} bytes, the app takes at most ${limits.definitionBytes}.`
     )
   }
+  walk.warnings.push(...idWarnings({ blocks: def.blocks }))
   walkBlocks(def.blocks, 1, 'blocks', walk)
   if (walk.blocks > limits.contentBlocks) {
     walk.warnings.push(`${walk.blocks} blocks, the app takes at most ${limits.contentBlocks}.`)
@@ -651,6 +666,56 @@ export function contentLimitWarnings(def: NativeContentDef): string[] {
     )
   }
   return walk.warnings
+}
+
+// --- Ids that have to be unique -------------------------------------------------
+
+function duplicates(ids: Array<string | undefined>): string[] {
+  const seen = new Set<string>()
+  const twice = new Set<string>()
+  for (const id of ids) {
+    if (id === undefined) continue
+    if (seen.has(id)) twice.add(id)
+    seen.add(id)
+  }
+  return [...twice]
+}
+
+function blockIds(blocks: NativeContentBlock[]): { blocks: string[]; items: string[] } {
+  const out = { blocks: [] as string[], items: [] as string[] }
+  const visit = (list: NativeContentBlock[]) => {
+    for (const block of list) {
+      if (block.id !== undefined) out.blocks.push(block.id)
+      if (block.type === 'list') {
+        for (const item of block.items) if (item.id !== undefined) out.items.push(item.id)
+      }
+      if (block.type === 'card' || block.type === 'row') visit(block.blocks)
+    }
+  }
+  visit(blocks)
+  return out
+}
+
+/** Ids are unique per surface: among the fields, among the blocks and among the list items. */
+function idWarnings(def: {
+  fields?: NativeFormField[]
+  pages?: NativeFormPage[]
+  blocks?: NativeContentBlock[]
+}): string[] {
+  const warnings: string[] = []
+  const fields = [...(def.fields ?? []), ...(def.pages ?? []).flatMap((page) => page.fields)]
+  const inBlocks = blockFields(def.blocks ?? [])
+  for (const id of duplicates([...fields, ...inBlocks].map((f) => f.id))) {
+    warnings.push(`The field id "${id}" is used twice: ids are unique per surface.`)
+  }
+  const ids = blockIds(def.blocks ?? [])
+  for (const id of duplicates(ids.blocks)) {
+    warnings.push(`The block id "${id}" is used twice: ids are unique per surface.`)
+  }
+  for (const id of duplicates(ids.items)) {
+    warnings.push(`The list item id "${id}" is used twice: ids are unique per surface.`)
+  }
+  return warnings
 }
 
 // --- Round trip --------------------------------------------------------------
@@ -713,6 +778,20 @@ export type ShowFormOptions = {
     values: NativeFormValues,
     event: NativeSurfaceActionEvent
   ) => SurfaceHandlerResult | Promise<SurfaceHandlerResult>
+  /**
+   * Called with every change of a field (feature `liveSurfaces`): the package sets
+   * `live: true` on all input fields that do not say otherwise (`info` fields are
+   * skipped) and calls this with the field id and the new value; text input arrives
+   * debounced 300 ms. In an app without the feature the form is `unavailable`.
+   */
+  onChange?: SurfaceChangeHandler
+  /**
+   * Answers the `search` fields that have `source: 'page'` (feature `pageSearch`): called
+   * with the field id and the query, return up to 50 options. Only the newest request per
+   * field is answered; a result that is already out of date is dropped. A rejection is
+   * not answered (the app times out after 10 seconds).
+   */
+  onSearch?: SurfaceSearchHandler
   /** Warn about exceeded limits in the console. Default: in development builds only. */
   validate?: boolean
 }
@@ -724,8 +803,221 @@ export type ShowContentOptions = {
    * Answer within 60 seconds; the return value works as for `onSubmit`.
    */
   onAction?: SurfaceActionHandler
+  /** As for `showForm`: changes of the `fields` blocks, feature `liveSurfaces`. */
+  onChange?: SurfaceChangeHandler
+  /** As for `showForm`: `search` fields with `source: 'page'`, feature `pageSearch`. */
+  onSearch?: SurfaceSearchHandler
   /** Warn about exceeded limits in the console. Default: in development builds only. */
   validate?: boolean
+}
+
+// --- Live surfaces (2026-11b) --------------------------------------------------
+
+/** A `live` field changed (`window.onNativeSurfaceChange`). */
+export type SurfaceChangeEvent = { id: string; fieldId: string; value: unknown }
+
+/** Typing in a `search` field with `source: 'page'` (`window.onNativeSurfaceSearch`). */
+export type SurfaceSearchEvent = { id: string; fieldId: string; query: string; requestId: string }
+
+/** One result of a page search. */
+export type SurfaceSearchOption = {
+  value: string
+  label: string
+  subtitle?: string
+  /** `https` URL or `data:` URI of at most 100 KB. */
+  image?: string
+}
+
+export type SurfaceChangeHandler = (fieldId: string, value: unknown) => void
+
+export type SurfaceSearchHandler = (
+  fieldId: string,
+  query: string
+) => SurfaceSearchOption[] | Promise<SurfaceSearchOption[]>
+
+/** Limits of live surfaces. */
+export const LIVE_SURFACE_LIMITS = {
+  /** Options of one page search answer. */
+  searchOptions: 50,
+  /** One `image` of an option, in bytes (a `data:` URI, decoded). */
+  searchImageBytes: 100 * 1024,
+  /** Seconds the page has to answer a search. */
+  searchSeconds: 10,
+  /** Debounce of text input for `onNativeSurfaceChange`, in milliseconds. */
+  changeDebounceMs: 300,
+} as const
+
+type LiveEntry = {
+  onChange?: SurfaceChangeHandler
+  onSearch?: SurfaceSearchHandler
+  /** The newest `requestId` per field: an answer to an older one is dropped. */
+  latest: Map<string, string>
+}
+
+const liveHandlers = new Map<string, LiveEntry>()
+let listeningLive = false
+
+function reportLater(error: unknown): void {
+  setTimeout(() => {
+    throw error
+  })
+}
+
+function listenLive(): void {
+  if (listeningLive) return
+  listeningLive = true
+  on('surfaceChange', (event) => {
+    if (!isRecord(event) || typeof event.id !== 'string') return
+    const entry = liveHandlers.get(event.id)
+    if (!entry?.onChange) return
+    try {
+      entry.onChange(event.fieldId, event.value)
+    } catch (error) {
+      reportLater(error)
+    }
+  })
+  on('surfaceSearch', (event) => void dispatchSearch(event))
+}
+
+function normalizeSearchOptions(options: unknown): SurfaceSearchOption[] {
+  const list = Array.isArray(options) ? options : []
+  const warnings: string[] = []
+  const valid = list.filter(
+    (o): o is SurfaceSearchOption =>
+      isRecord(o) && typeof o.value === 'string' && typeof o.label === 'string'
+  )
+  if (valid.length !== list.length) {
+    warnings.push('entries without a string value and label were left out.')
+  }
+  const limit = LIVE_SURFACE_LIMITS.searchOptions
+  if (valid.length > limit)
+    warnings.push(`${valid.length} options, the app takes at most ${limit}: cut.`)
+  const kept = valid.slice(0, limit).map((o) => {
+    if (o.image === undefined) return o
+    const ok =
+      typeof o.image === 'string' &&
+      (/^https:\/\//i.test(o.image) ||
+        (/^data:/i.test(o.image) && dataUriBytes(o.image) <= LIVE_SURFACE_LIMITS.searchImageBytes))
+    if (ok) return o
+    warnings.push(
+      `the image of "${o.value}" is not https or a data: URI of at most 100 KB: left out.`
+    )
+    const { image: _image, ...rest } = o
+    return rest
+  })
+  if (isDevelopment()) warn('onSearch', warnings)
+  return kept
+}
+
+async function dispatchSearch(event: SurfaceSearchEvent): Promise<void> {
+  if (!isRecord(event) || typeof event.id !== 'string') return
+  const entry = liveHandlers.get(event.id)
+  if (!entry?.onSearch) return
+  const { fieldId, query, requestId } = event
+  entry.latest.set(fieldId, requestId)
+  let options: unknown
+  try {
+    options = await entry.onSearch(fieldId, query)
+  } catch (error) {
+    if (isDevelopment()) warn('onSearch', [`the handler for "${fieldId}" failed: ${String(error)}`])
+    return
+  }
+  // The surface is gone, or the user typed on: a stale answer would show old results.
+  if (liveHandlers.get(event.id) !== entry || entry.latest.get(fieldId) !== requestId) return
+  await callFeature('pageSearch', 'surfaceSearchResult', {
+    requestId,
+    options: normalizeSearchOptions(options),
+  })
+}
+
+/** All form fields of a definition, pages included (not the inner fields of `repeat`). */
+function formFields(def: Pick<NativeFormDef, 'fields' | 'pages'>): NativeFormField[] {
+  return [...(def.fields ?? []), ...(def.pages ?? []).flatMap((page) => page.fields)]
+}
+
+function blockFields(blocks: NativeContentBlock[]): NativeFormField[] {
+  return blocks.flatMap((block): NativeFormField[] => {
+    if (block.type === 'fields') return block.fields
+    if (block.type === 'card' || block.type === 'row') return blockFields(block.blocks)
+    return []
+  })
+}
+
+function usesPageSearch(fields: NativeFormField[]): boolean {
+  return fields.some((f) => f.type === 'search' && f.source === 'page')
+}
+
+/**
+ * The types whose value is a single value the app can report on every change. `photo`, `scan`
+ * and `signature` deliver files, `repeat` rows and `info` nothing: they are never `live`.
+ */
+const NOT_LIVE: ReadonlySet<string> = new Set(['photo', 'scan', 'signature', 'repeat', 'info'])
+
+function isLiveType(field: NativeFormField): boolean {
+  return !NOT_LIVE.has(field.type ?? 'text')
+}
+
+/**
+ * `live: true` on the scalar fields that do not say otherwise; a `live` on any other type
+ * is removed (the app would refuse it), development builds say so.
+ */
+function withLiveFields(fields: NativeFormField[], mark = true): NativeFormField[] {
+  return fields.map((f) => {
+    if (!isLiveType(f)) {
+      if (f.live !== true) return f // `live: false` is no claim
+      if (isDevelopment()) {
+        warn('live', [
+          `field "${f.id}" is of type ${f.type}: only scalar fields can be live, left out.`,
+        ])
+      }
+      const { live: _live, ...rest } = f
+      return rest as NativeFormField
+    }
+    return mark && f.live === undefined ? { ...f, live: true } : f
+  })
+}
+
+function withLiveBlocks(blocks: NativeContentBlock[], mark = true): NativeContentBlock[] {
+  return blocks.map((block): NativeContentBlock => {
+    if (block.type === 'fields') return { ...block, fields: withLiveFields(block.fields, mark) }
+    if (block.type === 'card' || block.type === 'row') {
+      return { ...block, blocks: withLiveBlocks(block.blocks, mark) }
+    }
+    return block
+  })
+}
+
+function withLiveForm<T extends Pick<NativeFormDef, 'fields' | 'pages'>>(def: T, mark = true): T {
+  return {
+    ...def,
+    ...(def.fields && { fields: withLiveFields(def.fields, mark) }),
+    ...(def.pages && {
+      pages: def.pages.map((page) => ({ ...page, fields: withLiveFields(page.fields, mark) })),
+    }),
+  }
+}
+
+/**
+ * Does the definition need features the app lacks? Live fields need `liveSurfaces`,
+ * `source: 'page'` needs `pageSearch`. An older app would ignore both and the page
+ * would wait for events that never come, so the call is `unavailable`.
+ */
+function missingLiveFeature(
+  fields: NativeFormField[],
+  onChange: boolean,
+  onSearch: boolean
+): boolean {
+  const live = onChange || fields.some((f) => f.live === true)
+  const page = usesPageSearch(fields)
+  if (isDevelopment() && onSearch && !page) {
+    warn('onSearch', ['no search field has source: "page", so onSearch is never called.'])
+  }
+  if (isDevelopment() && !onSearch && page) {
+    warn('showForm', [
+      'a search field has source: "page" but there is no onSearch: nobody answers it.',
+    ])
+  }
+  return (live && !hasFeature('liveSurfaces')) || (page && !hasFeature('pageSearch'))
 }
 
 type HandlerEntry = {
@@ -810,25 +1102,32 @@ async function open<R extends NativeSurfaceResult>(
   action: 'showForm' | 'showContent',
   payload: NativeFormDef | NativeContentDef,
   handler?: SurfaceActionHandler,
-  validate = false
+  validate = false,
+  live?: Pick<LiveEntry, 'onChange' | 'onSearch'>
 ): Promise<R> {
   if (typeof window === 'undefined' || !window.BMSNative) {
     return { ok: false, error: 'unavailable' } as R
   }
-  if (!handler) return (await call(action, payload)) as unknown as R
+  if (!handler && !live) return (await call(action, payload)) as unknown as R
   const id = payload.id as string
-  if (handlers.has(id)) {
+  if (handlers.has(id) || liveHandlers.has(id)) {
     return {
       ok: false,
       error: 'busy',
       message: `A surface with the id "${id}" is already open.`,
     } as R
   }
-  const unregister = register(id, handler, validate)
+  const unregister = handler ? register(id, handler, validate) : () => {}
+  const liveEntry: LiveEntry | undefined = live && { ...live, latest: new Map() }
+  if (liveEntry) {
+    liveHandlers.set(id, liveEntry)
+    listenLive()
+  }
   try {
     return (await call(action, payload)) as unknown as R
   } finally {
     unregister()
+    if (liveEntry && liveHandlers.get(id) === liveEntry) liveHandlers.delete(id)
   }
 }
 
@@ -869,18 +1168,25 @@ export function showForm(
 ): Promise<NativeFormResult> {
   const validate = options.validate ?? isDevelopment()
   if (validate) warn('showForm', formLimitWarnings(def))
-  const { onSubmit } = options
-  if (!onSubmit) return open<NativeFormResult>('showForm', def)
+  const { onSubmit, onChange, onSearch } = options
+  // `live` only on scalar fields: set on all of them with onChange, removed from any other.
+  const base = withLiveForm(def, !!onChange)
+  if (missingLiveFeature(formFields(base), !!onChange, !!onSearch)) {
+    return Promise.resolve({ ok: false, error: 'unavailable' })
+  }
+  const live = onChange || onSearch ? { onChange, onSearch } : undefined
+  if (!onSubmit && !live) return open<NativeFormResult>('showForm', base)
   const payload: NativeFormDef = {
-    ...def,
+    ...base,
     id: def.id ?? newSurfaceId(),
-    submit: { ...def.submit, wait: true },
+    ...(onSubmit && { submit: { ...def.submit, wait: true } }),
   }
   return open<NativeFormResult>(
     'showForm',
     payload,
-    (event) => onSubmit(event.values ?? {}, event),
-    validate
+    onSubmit && ((event) => onSubmit(event.values ?? {}, event)),
+    validate,
+    live
   )
 }
 
@@ -924,15 +1230,20 @@ export function showContent(
 ): Promise<NativeContentResult> {
   const validate = options.validate ?? isDevelopment()
   if (validate) warn('showContent', contentLimitWarnings(def))
-  const { onAction } = options
-  if (!onAction) return open<NativeContentResult>('showContent', def)
+  const { onAction, onChange, onSearch } = options
+  const blocks = withLiveBlocks(def.blocks, !!onChange)
+  if (missingLiveFeature(blockFields(blocks), !!onChange, !!onSearch)) {
+    return Promise.resolve({ ok: false, error: 'unavailable' })
+  }
+  const live = onChange || onSearch ? { onChange, onSearch } : undefined
+  if (!onAction && !live) return open<NativeContentResult>('showContent', { ...def, blocks })
   const payload: NativeContentDef = {
     ...def,
     id: def.id ?? newSurfaceId(),
-    blocks: withWaitInBlocks(def.blocks),
-    ...(def.actions && { actions: def.actions.map(withWait) }),
+    blocks: onAction ? withWaitInBlocks(blocks) : blocks,
+    ...(def.actions && { actions: onAction ? def.actions.map(withWait) : def.actions }),
   }
-  return open<NativeContentResult>('showContent', payload, onAction, validate)
+  return open<NativeContentResult>('showContent', payload, onAction, validate, live)
 }
 
 /**
@@ -989,6 +1300,94 @@ export function closeSurface(payload: { id?: string } = {}): Promise<NativeResul
  */
 export function surfaceResult(payload: SurfaceResultPayload): Promise<NativeResult> {
   return call('surfaceResult', payload)
+}
+
+/**
+ * What `updateSurface` replaces. Only the keys you give change; the rest of the open
+ * surface stays.
+ */
+export type UpdateSurfaceOptions = {
+  /** The open surface. `notFound` if it is not open. */
+  id: string
+  title?: string
+  /** Content only. */
+  subtitle?: string
+  /** Content only. Give blocks, fields and list items an `id` to keep scroll position, focus and entered values. */
+  blocks?: NativeContentBlock[]
+  /** Content only: the footer actions. */
+  actions?: NativeAction[]
+  /** Forms: new values by field id. */
+  values?: Record<string, unknown>
+  /** Forms: replaces the fields (single-page form). */
+  fields?: NativeFormField[]
+  /** Forms: replaces the pages. */
+  pages?: NativeFormPage[]
+}
+
+function updateProblem(update: unknown): string | undefined {
+  if (!isRecord(update) || !nonEmptyString(update.id)) return 'id of the open surface is required.'
+  for (const key of ['title', 'subtitle'] as const) {
+    if (update[key] !== undefined && typeof update[key] !== 'string')
+      return `${key} has to be a string.`
+  }
+  for (const key of ['blocks', 'actions', 'fields', 'pages'] as const) {
+    if (update[key] !== undefined && !Array.isArray(update[key])) return `${key} has to be a list.`
+  }
+  if (update.values !== undefined && !isRecord(update.values)) return 'values has to be an object.'
+  return idWarnings({
+    fields: update.fields as NativeFormField[] | undefined,
+    pages: update.pages as NativeFormPage[] | undefined,
+    blocks: update.blocks as NativeContentBlock[] | undefined,
+  })[0]
+}
+
+/**
+ * Updates the open surface `id` without closing it, for example the blocks of a
+ * content screen while the user edits a form field, or the options of a form. Only the
+ * keys you give are replaced. Where blocks, fields and list items carry an `id`, the app
+ * keeps the scroll position, the focus and what the user entered. Requires
+ * `nativeForms` or `nativeContent`, `customChrome` and the feature `liveSurfaces`.
+ *
+ * The limits are those of `showForm` and `showContent` (checked in development
+ * builds, enforced by the app: `tooLarge`). If the surface was opened with
+ * `onChange`, new fields become `live` as well.
+ *
+ * Errors: `notFound` (not open), `invalid`, `tooLarge`, `capability`, `unavailable`
+ * (browser, app without the feature).
+ */
+export async function updateSurface(
+  update: UpdateSurfaceOptions
+): Promise<{ ok: true } | NativeSurfaceFailure> {
+  const problem = updateProblem(update)
+  if (problem) {
+    if (isDevelopment()) warn('updateSurface', [problem])
+    return { ok: false, error: 'invalid', message: problem }
+  }
+  if (isDevelopment()) {
+    if (update.blocks || update.actions) {
+      warn(
+        'updateSurface',
+        contentLimitWarnings({ blocks: update.blocks ?? [], actions: update.actions })
+      )
+    }
+    if (update.fields || update.pages) {
+      warn(
+        'updateSurface',
+        formLimitWarnings({ fields: update.fields, pages: update.pages, values: update.values })
+      )
+    }
+  }
+  const live = liveHandlers.get(update.id)?.onChange !== undefined
+  const payload: UpdateSurfaceOptions = {
+    ...update,
+    ...(update.fields && { fields: withLiveFields(update.fields, live) }),
+    ...(update.pages && { pages: withLiveForm({ pages: update.pages }, live).pages }),
+    ...(update.blocks && { blocks: withLiveBlocks(update.blocks, live) }),
+  }
+  const answer = await callFeature('liveSurfaces', 'updateSurface', { ...payload })
+  if (answer.ok) return { ok: true }
+  const { error, message } = answer as { error: string; message?: string }
+  return { ok: false, error: error as NativeSurfaceError, ...(message && { message }) }
 }
 
 // --- Fallback helpers --------------------------------------------------------

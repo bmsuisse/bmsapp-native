@@ -1,0 +1,171 @@
+{
+  "description": "Segments under the navigation bar (feature segments): `setChrome({ segments })`.",
+  "chrome": {
+    "valid": [
+      {
+        "name": "two segments",
+        "value": {
+          "segments": {
+            "id": "view",
+            "items": [
+              {
+                "id": "list",
+                "label": "List"
+              },
+              {
+                "id": "map",
+                "label": "Map"
+              }
+            ],
+            "selected": "list"
+          }
+        }
+      },
+      {
+        "name": "five segments with badges",
+        "value": {
+          "segments": {
+            "id": "tabs",
+            "items": {
+              "@repeat": 5,
+              "of": {
+                "id": "s{k}",
+                "label": "Tab {k}",
+                "badge": "3"
+              }
+            },
+            "selected": "s2"
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "one item",
+        "value": {
+          "segments": {
+            "id": "v",
+            "items": [
+              {
+                "id": "a",
+                "label": "A"
+              }
+            ],
+            "selected": "a"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "six items",
+        "value": {
+          "segments": {
+            "id": "v",
+            "items": {
+              "@repeat": 6,
+              "of": {
+                "id": "s{k}",
+                "label": "S{k}"
+              }
+            },
+            "selected": "s0"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "selected is not an item",
+        "value": {
+          "segments": {
+            "id": "v",
+            "items": [
+              {
+                "id": "a",
+                "label": "A"
+              },
+              {
+                "id": "b",
+                "label": "B"
+              }
+            ],
+            "selected": "c"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "items with the same id",
+        "value": {
+          "segments": {
+            "id": "v",
+            "items": [
+              {
+                "id": "a",
+                "label": "A"
+              },
+              {
+                "id": "a",
+                "label": "B"
+              }
+            ],
+            "selected": "a"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a badge that is a number",
+        "value": {
+          "segments": {
+            "id": "v",
+            "items": [
+              {
+                "id": "a",
+                "label": "A",
+                "badge": 3
+              },
+              {
+                "id": "b",
+                "label": "B"
+              }
+            ],
+            "selected": "a"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "no id",
+        "value": {
+          "segments": {
+            "items": [
+              {
+                "id": "a",
+                "label": "A"
+              },
+              {
+                "id": "b",
+                "label": "B"
+              }
+            ],
+            "selected": "a"
+          }
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "events": {
+    "segmentSelect": {
+      "valid": [
+        {
+          "name": "a tap",
+          "value": {
+            "id": "view",
+            "item": "map"
+          }
+        }
+      ]
+    }
+  }
+}

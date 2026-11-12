@@ -336,6 +336,8 @@ class NativeFact(_CamelModel):
 
 
 class NativeListItem(_CamelModel):
+    #: Lets the app keep scroll position and state when `updateSurface` replaces the blocks.
+    id: str | None = Field(default=None, min_length=1)
     title: str
     subtitle: str | None = None
     trailing: Value | None = None
@@ -362,14 +364,20 @@ class NativeBadge(_CamelModel):
     icon: str | None = None
 
 
-class HeadingBlock(_CamelModel):
+class _BlockBase(_CamelModel):
+    #: Lets the app keep the scroll position, the focus and the entered values
+    #: when `updateSurface` replaces the blocks.
+    id: str | None = Field(default=None, min_length=1)
+
+
+class HeadingBlock(_BlockBase):
     type: Literal["heading"] = "heading"
     text: str
     level: Literal[1, 2, 3] | None = None
     icon: str | None = None
 
 
-class TextBlock(_CamelModel):
+class TextBlock(_BlockBase):
     type: Literal["text"] = "text"
     #: Paragraphs, lists, quotes, tables, bold/italic/links. No HTML.
     markdown: str
@@ -390,7 +398,7 @@ def _require_https(value: str | None, what: str) -> None:
         raise ValueError(f"{what} must be an https URL.")
 
 
-class ImageBlock(_CamelModel):
+class ImageBlock(_BlockBase):
     type: Literal["image"] = "image"
     #: `https` URL. URLs on the web app's own backend load with its token.
     url: str | None = None
@@ -421,17 +429,17 @@ class ImageBlock(_CamelModel):
         return self
 
 
-class FactsBlock(_CamelModel):
+class FactsBlock(_BlockBase):
     type: Literal["facts"] = "facts"
     items: list[NativeFact] = Field(min_length=1)
 
 
-class ListBlock(_CamelModel):
+class ListBlock(_BlockBase):
     type: Literal["list"] = "list"
     items: list[NativeListItem] = Field(min_length=1)
 
 
-class TableBlock(_CamelModel):
+class TableBlock(_BlockBase):
     type: Literal["table"] = "table"
     #: 1 to 20 columns.
     columns: list[NativeTableColumn] = Field(min_length=1)
@@ -456,7 +464,7 @@ class TableBlock(_CamelModel):
         return self
 
 
-class MapBlock(_CamelModel):
+class MapBlock(_BlockBase):
     type: Literal["map"] = "map"
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
@@ -466,7 +474,7 @@ class MapBlock(_CamelModel):
     height: float | None = Field(default=None, gt=0)
 
 
-class FileBlock(_CamelModel):
+class FileBlock(_BlockBase):
     type: Literal["file"] = "file"
     #: `https` URL; a tap previews it. URLs on the web app's own backend load
     #: with its token.
@@ -480,7 +488,7 @@ class FileBlock(_CamelModel):
         return self
 
 
-class VideoBlock(_CamelModel):
+class VideoBlock(_BlockBase):
     type: Literal["video"] = "video"
     url: str
     poster: str | None = None
@@ -492,19 +500,19 @@ class VideoBlock(_CamelModel):
         return self
 
 
-class CalloutBlock(_CamelModel):
+class CalloutBlock(_BlockBase):
     type: Literal["callout"] = "callout"
     style: Literal["info", "success", "warning", "error"]
     title: str | None = None
     text: str
 
 
-class BadgesBlock(_CamelModel):
+class BadgesBlock(_BlockBase):
     type: Literal["badges"] = "badges"
     items: list[NativeBadge] = Field(min_length=1)
 
 
-class ButtonsBlock(_CamelModel):
+class ButtonsBlock(_BlockBase):
     type: Literal["buttons"] = "buttons"
     #: One to six actions in a row.
     items: list[NativeAction] = Field(min_length=1)
@@ -519,51 +527,51 @@ class ButtonsBlock(_CamelModel):
         return self
 
 
-class KpiBlock(_CamelModel):
+class KpiBlock(_BlockBase):
     type: Literal["kpi"] = "kpi"
     #: The same data as the `kpi` dashboard widget.
     data: KpiData
 
 
-class StatsBlock(_CamelModel):
+class StatsBlock(_BlockBase):
     type: Literal["stats"] = "stats"
     data: StatsData
 
 
-class ChartBlock(_CamelModel):
+class ChartBlock(_BlockBase):
     type: Literal["chart"] = "chart"
     data: ChartData
 
 
-class ProgressBlock(_CamelModel):
+class ProgressBlock(_BlockBase):
     type: Literal["progress"] = "progress"
     data: ProgressData
 
 
-class FieldsBlock(_CamelModel):
+class FieldsBlock(_BlockBase):
     type: Literal["fields"] = "fields"
     #: Form fields inside content. Their values come back with an action that
     #: has `submit=True`.
     fields: list[ActionField] = Field(min_length=1)
 
 
-class CardBlock(_CamelModel):
+class CardBlock(_BlockBase):
     type: Literal["card"] = "card"
     title: str | None = None
     blocks: list[NativeContentBlock] = Field(min_length=1)
 
 
-class RowBlock(_CamelModel):
+class RowBlock(_BlockBase):
     type: Literal["row"] = "row"
     #: Two or three blocks side by side.
     blocks: list[NativeContentBlock] = Field(min_length=2, max_length=3)
 
 
-class DividerBlock(_CamelModel):
+class DividerBlock(_BlockBase):
     type: Literal["divider"] = "divider"
 
 
-class SpacerBlock(_CamelModel):
+class SpacerBlock(_BlockBase):
     type: Literal["spacer"] = "spacer"
     height: float | None = Field(default=None, ge=0)
 
@@ -659,11 +667,28 @@ def _check_content_limits(content: NativeContent) -> None:
         )
     _check_inline_images(blocks)
     _check_fields_blocks(blocks)
+    _check_unique_ids(blocks)
     if (chain := _chain_depth(content)) > MAX_CHAIN_DEPTH:
         raise SurfaceLimitError(
             f"{chain} chained surfaces after the first one, the app takes at most "
             f"{MAX_CHAIN_DEPTH} ({MAX_CHAIN_DEPTH + 1} screens in a flow in total)."
         )
+
+
+def _check_unique_ids(blocks: list[tuple[Any, int]]) -> None:
+    """Ids are unique per surface: among the blocks, among the list items, and among
+    the fields of the `fields` blocks."""
+    kinds: dict[str, list[str]] = {"block": [], "list item": [], "field": []}
+    for block, _ in blocks:
+        if block.id is not None:
+            kinds["block"].append(block.id)
+        if isinstance(block, ListBlock):
+            kinds["list item"].extend(item.id for item in block.items if item.id is not None)
+        if isinstance(block, FieldsBlock):
+            kinds["field"].extend(field.id for field in block.fields)
+    for kind, ids in kinds.items():
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"A {kind} `id` is used twice: ids are unique per surface.")
 
 
 def _check_inline_images(blocks: list[tuple[Any, int]]) -> None:

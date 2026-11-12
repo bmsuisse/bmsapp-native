@@ -60,3 +60,5 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fa
 [tool.ruff.lint.per-file-ignores]
 # Module docstring with curl calls for copy-paste.
 "python/app-native/example/main.py" = ["E501"]
+# One-line JavaScript snippets that run in the browser.
+"e2e/test_*.py" = ["E501"]

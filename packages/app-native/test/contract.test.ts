@@ -293,7 +293,7 @@ const nativeForm: NativeFormDef = {
       title: 'Contact',
       text: 'How do we reach them?',
       fields: [
-        { id: 'email', type: 'email', label: 'Email', required: true },
+        { id: 'email', type: 'email', label: 'Email', required: true, live: true },
         { id: 'phone', type: 'phone', label: 'Phone' },
         { id: 'website', type: 'url', label: 'Website', placeholder: 'https://example.com' },
         {
@@ -301,6 +301,7 @@ const nativeForm: NativeFormDef = {
           type: 'search',
           label: 'Account manager',
           minQueryLength: 2,
+          source: 'page',
           value: 'u-1',
           valueLabel: 'Anna Muster',
         },
@@ -396,7 +397,7 @@ const nativeContent: NativeContentDef = {
       tapToZoom: true,
     },
     { type: 'image', data: 'data:image/png;base64,iVBORw0KGgo=', shape: 'circle' },
-    { type: 'heading', text: 'Overview', level: 2, icon: 'building.2' },
+    { type: 'heading', id: 'overview', text: 'Overview', level: 2, icon: 'building.2' },
     {
       type: 'badges',
       items: [{ text: 'Key account', tint: '#2e4a62', icon: 'star' }, { text: 'Zurich' }],
@@ -468,8 +469,10 @@ const nativeContent: NativeContentDef = {
     },
     {
       type: 'list',
+      id: 'contacts',
       items: [
         {
+          id: 'contact-1',
           title: 'Anna Muster',
           subtitle: 'Purchasing',
           trailing: 'Main contact',

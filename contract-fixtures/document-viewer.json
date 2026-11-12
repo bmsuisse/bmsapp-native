@@ -1,0 +1,358 @@
+{
+  "description": "The native document viewer (feature documentViewer): showDocument, updateDocument and the events. \"{origin}\" is the origin of the web app's page; the URL is sent as an absolute one.",
+  "options": {
+    "valid": [
+      {
+        "name": "a PDF",
+        "value": {
+          "url": "/api/offers/4711/file"
+        },
+        "sent": {
+          "url": "{origin}/api/offers/4711/file"
+        }
+      },
+      {
+        "name": "with highlights, a page and a selection",
+        "value": {
+          "id": "offer-pdf",
+          "url": "{origin}/api/offers/4711/file",
+          "title": "Offer 4711",
+          "page": 2,
+          "highlights": [
+            {
+              "id": "l1",
+              "page": 1,
+              "x": 0.1,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "primary",
+              "label": "Pallet"
+            },
+            {
+              "id": "l2",
+              "page": 2,
+              "x": 0.1,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "secondary",
+              "label": "Pallet"
+            }
+          ],
+          "selected": "l2"
+        }
+      },
+      {
+        "name": "500 highlights",
+        "value": {
+          "url": "/f.pdf",
+          "highlights": {
+            "@repeat": 500,
+            "of": {
+              "id": "h{k}",
+              "page": 1,
+              "x": 0,
+              "y": 0,
+              "w": 1,
+              "h": 1,
+              "style": "secondary"
+            }
+          }
+        },
+        "sent": {
+          "url": "{origin}/f.pdf",
+          "highlights": {
+            "@repeat": 500,
+            "of": {
+              "id": "h{k}",
+              "page": 1,
+              "x": 0,
+              "y": 0,
+              "w": 1,
+              "h": 1,
+              "style": "secondary"
+            }
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "another host",
+        "value": {
+          "url": "https://other.example.com/a.pdf"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "no url",
+        "value": {
+          "id": "x"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "501 highlights",
+        "value": {
+          "url": "/f.pdf",
+          "highlights": {
+            "@repeat": 501,
+            "of": {
+              "id": "h{k}",
+              "page": 1,
+              "x": 0,
+              "y": 0,
+              "w": 1,
+              "h": 1,
+              "style": "secondary"
+            }
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "x above 1",
+        "value": {
+          "url": "/f.pdf",
+          "highlights": [
+            {
+              "id": "l1",
+              "page": 1,
+              "x": 1.5,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "primary",
+              "label": "Pallet"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "page 0",
+        "value": {
+          "url": "/f.pdf",
+          "highlights": [
+            {
+              "id": "l1",
+              "page": 0,
+              "x": 0.1,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "primary",
+              "label": "Pallet"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an unknown style",
+        "value": {
+          "url": "/f.pdf",
+          "highlights": [
+            {
+              "id": "l1",
+              "page": 1,
+              "x": 0.1,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "tertiary",
+              "label": "Pallet"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a highlight id used twice",
+        "value": {
+          "url": "/f.pdf",
+          "highlights": [
+            {
+              "id": "l1",
+              "page": 1,
+              "x": 0.1,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "primary",
+              "label": "Pallet"
+            },
+            {
+              "id": "l1",
+              "page": 1,
+              "x": 0.1,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "primary",
+              "label": "Pallet"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "page 0 of the viewer",
+        "value": {
+          "url": "/f.pdf",
+          "page": 0
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "update": {
+    "description": "updateDocument(options) on the open viewer `id`.",
+    "valid": [
+      {
+        "name": "move the highlights and select one",
+        "value": {
+          "id": "offer-pdf",
+          "highlights": [
+            {
+              "id": "l1",
+              "page": 1,
+              "x": 0.1,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "primary",
+              "label": "Pallet"
+            }
+          ],
+          "selected": "l1"
+        }
+      },
+      {
+        "name": "go to a page",
+        "value": {
+          "id": "offer-pdf",
+          "page": 3
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no id",
+        "value": {
+          "selected": "l1"
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "selected is a number",
+        "value": {
+          "id": "offer-pdf",
+          "selected": 1
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "a highlight with a wrong style",
+        "value": {
+          "id": "offer-pdf",
+          "highlights": [
+            {
+              "id": "l1",
+              "page": 1,
+              "x": 0.1,
+              "y": 0.4,
+              "w": 0.8,
+              "h": 0.05,
+              "style": "x",
+              "label": "Pallet"
+            }
+          ]
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "closed by the user",
+        "value": {
+          "ok": true
+        }
+      },
+      {
+        "name": "the file could not be loaded",
+        "value": {
+          "ok": false,
+          "error": "failed",
+          "status": 404
+        }
+      },
+      {
+        "name": "not available",
+        "value": {
+          "ok": false,
+          "error": "unavailable"
+        }
+      }
+    ],
+    "invalid": []
+  },
+  "updateResults": {
+    "valid": [
+      {
+        "name": "updated",
+        "value": {
+          "ok": true
+        }
+      },
+      {
+        "name": "not open",
+        "value": {
+          "ok": false,
+          "error": "notFound"
+        }
+      }
+    ],
+    "invalid": []
+  },
+  "events": {
+    "documentTap": {
+      "valid": [
+        {
+          "name": "a tap on a highlight",
+          "value": {
+            "id": "offer-pdf",
+            "highlightId": "l1",
+            "page": 1,
+            "x": 0.4,
+            "y": 0.42
+          }
+        },
+        {
+          "name": "a tap outside every highlight",
+          "value": {
+            "id": "offer-pdf",
+            "highlightId": null,
+            "page": 2,
+            "x": 0.9,
+            "y": 0.1
+          }
+        }
+      ]
+    },
+    "documentPage": {
+      "valid": [
+        {
+          "name": "scrolled to page 3",
+          "value": {
+            "id": "offer-pdf",
+            "page": 3
+          }
+        }
+      ]
+    }
+  }
+}

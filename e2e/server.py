@@ -30,12 +30,20 @@ backend of a web app does for them is real here:
                       `resolve_file_refs` and can answer a field error.
 - `GET  /backend-log`         what the document and options routers received.
 
+Contract 2026-11 (`scanDocument` options, `pickFiles`, `dictate`, `previewFile`,
+back interception, resource tokens): `POST /native/<action>` checks the payload
+the way the app does (`invalid`), written independently of the npm package. What
+the app does with a valid one is played by the page's fake bridge. The files that
+`previewFile` downloads are `GET /files/<name>` (`missing…` is a 404).
+
 Sign-in with the Entra token, as a backend built with `bmsdna-app-native`
 does it. A throw-away RSA key stands in for Microsoft, no real tenant is
 involved:
 
 - `POST /native/getAccessToken` is the app: it hands out a token of the current
-                      "app user" (`STATE["user"]`).
+                      "app user" (`STATE["user"]`). With a `resource` the token is for the
+                      "other API" (`GET /api/other-api/me`, which takes only such tokens);
+                      the user consents first (`consentRequired`, `interactive`).
 - `GET  /api/me`      protected with `create_entra_auth_dependency`; the same
                       for `GET /api/avatar.svg`, which a page can only load with a cookie
                       (`<img>` sets no `Authorization` header).
@@ -48,27 +56,36 @@ and backend packages speak the same format.
 """
 
 import json
+import re
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import jwt
+import rules
 from bmsdna.app_native import (
+    ActionField,
     ActionOption,
+    ActionPage,
     EntraTokenError,
     EntraTokenVerifier,
     EntraUser,
+    InMemoryUploadResults,
     LiveActivityState,
     NativeContent,
     NativeFileRef,
     NativeForm,
+    NativeMenu,
     ReceivedDocument,
     SignedSessionCookie,
     SurfaceLimitError,
     Widget,
     WidgetOptionsRequest,
     WidgetRequestContext,
+    check_document_context,
     create_document_router,
     create_entra_auth_dependency,
     create_widget_feed_router,
@@ -100,11 +117,26 @@ CLIENT = "11111111-1111-4111-8111-1111111111bb"
 ANNA = {"oid": "22222222-2222-4222-8222-2222222222cc", "email": "anna@example.com"}
 BORIS = {"oid": "33333333-3333-4333-8333-3333333333dd", "email": "boris@example.com"}
 
+#: The "other API" that `getAccessToken({ resource })` is for (a placeholder ID).
+OTHER_CLIENT = "44444444-4444-4444-8444-4444444444ee"
+RESOURCE = f"api://{OTHER_CLIENT}/.default"
+
 _KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _KID = "e2e-key"
 
 #: Who is signed in to the "app". Tests switch it; `DELETE /native-log` resets it.
-STATE: dict[str, Any] = {"user": ANNA, "reference": "id"}
+STATE: dict[str, Any] = {
+    "user": ANNA,
+    "reference": "id",
+    # Whether the document router remembers answers per `upload_id`.
+    "dedupe": False,
+    # `filename` -> how many uploads of it still fail with a 503.
+    "upload_failures": {},
+    # The resources configured for this web app in the app, and which of them the
+    # user has already consented to.
+    "resources": [RESOURCE],
+    "consented": [],
+}
 
 #: What the document and options routers received, newest last.
 BACKEND_LOG: dict[str, list[dict[str, Any]]] = {"uploads": [], "options": []}
@@ -143,6 +175,8 @@ def mint_token(
 
 
 VERIFIER = EntraTokenVerifier(tenant_id=TENANT, audience=CLIENT, fetch_jwks=_fetch_jwks)
+OTHER_VERIFIER = EntraTokenVerifier(tenant_id=TENANT, audience=OTHER_CLIENT, fetch_jwks=_fetch_jwks)
+OTHER_AUTH = create_entra_auth_dependency(OTHER_VERIFIER)
 AUTH = create_entra_auth_dependency(
     VERIFIER,
     # Secure is fine here: browsers treat http://127.0.0.1 as a secure origin.
@@ -231,7 +265,201 @@ def _scan(action: str, body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True}
 
 
-def _answer(action: str, body: dict[str, Any]) -> dict[str, Any]:
+# --- Contract 2026-11 ----------------------------------------------------------
+# What the app checks before it does anything (`invalid`). Written independently of
+# the npm package: the fixtures run against both.
+
+_KIND = re.compile(r"^[a-z0-9_-]{1,32}$")
+_SOURCES = ("files", "photos", "camera")
+
+
+def _bad(message: str) -> dict[str, Any]:
+    return {"ok": False, "error": "invalid", "message": message}
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _document_options_problem(body: dict[str, Any]) -> str | None:
+    """`context`, `kind`, `mode` and `multiple` as `scanDocument` and `pickFiles` take them."""
+    context = body.get("context")
+    if context is not None:
+        if not isinstance(context, dict):
+            return "context has to be a JSON object"
+        try:
+            check_document_context(context)
+        except ValueError as error:
+            return str(error)
+    kind = body.get("kind")
+    if "kind" in body and not (isinstance(kind, str) and _KIND.fullmatch(kind)):
+        return "kind has to match [a-z0-9_-]{1,32}"
+    if body.get("mode", "upload") not in ("upload", "return"):
+        return "mode has to be upload or return"
+    if "multiple" in body and not isinstance(body["multiple"], bool):
+        return "multiple has to be a boolean"
+    return None
+
+
+def _scan_document(body: dict[str, Any]) -> dict[str, Any]:
+    problem = _document_options_problem(body)
+    return _bad(problem) if problem else {"ok": True}
+
+
+def _pick_files(body: dict[str, Any]) -> dict[str, Any]:
+    sources = body.get("sources")
+    if not isinstance(sources, list) or not sources or any(s not in _SOURCES for s in sources):
+        return _bad("sources needs at least one of files, photos, camera")
+    accept = body.get("accept")
+    if "accept" in body and not (
+        isinstance(accept, list) and all(isinstance(a, str) for a in accept)
+    ):
+        return _bad("accept has to be a list of strings")
+    problem = _document_options_problem(body)
+    return _bad(problem) if problem else {"ok": True}
+
+
+def _dictate(body: dict[str, Any]) -> dict[str, Any]:
+    locale = body.get("locale")
+    if "locale" in body and not (isinstance(locale, str) and locale):
+        return _bad("locale has to be a BCP-47 string")
+    seconds = body.get("maxSeconds")
+    if "maxSeconds" in body and not (
+        isinstance(seconds, int) and not isinstance(seconds, bool) and 1 <= seconds <= 120
+    ):
+        return _bad("maxSeconds has to be a whole number from 1 to 120")
+    strings = body.get("contextualStrings")
+    if "contextualStrings" in body and not (
+        isinstance(strings, list)
+        and len(strings) <= 50
+        and all(isinstance(t, str) for t in strings)
+    ):
+        return _bad("contextualStrings has to be at most 50 strings")
+    return {"ok": True}
+
+
+def _preview_file(body: dict[str, Any], host: str | None) -> dict[str, Any]:
+    url = body.get("url")
+    if not isinstance(url, str) or not url:
+        return _bad("url is required")
+    if "filename" in body and not isinstance(body["filename"], str):
+        return _bad("filename has to be a string")
+    parts = urlsplit(url)
+    if parts.scheme not in ("", "http", "https"):
+        return _bad("url has to be on the web app's own origin")
+    if parts.netloc and parts.netloc != host:
+        return _bad("url has to be on the web app's own origin")
+    return {"ok": True}
+
+
+def _access_token(body: dict[str, Any]) -> dict[str, Any]:
+    if "resource" not in body:
+        token = mint_token(**STATE["user"])
+        exp = jwt.decode(token, options={"verify_signature": False})["exp"]
+        return {"ok": True, "token": token, "expiresAt": exp}
+    resource = body["resource"]
+    if not isinstance(resource, str) or not resource:
+        return _bad("resource has to be an Entra scope")
+    if "interactive" in body and not isinstance(body["interactive"], bool):
+        return _bad("interactive has to be a boolean")
+    if resource not in STATE["resources"]:
+        return {"ok": False, "error": "forbidden"}
+    if resource not in STATE["consented"]:
+        if body.get("interactive") is not True:
+            return {"ok": False, "error": "consentRequired"}
+        STATE["consented"].append(resource)
+    audience = resource.removeprefix("api://").removesuffix("/.default")
+    token = mint_token(**STATE["user"], audience=audience)
+    exp = jwt.decode(token, options={"verify_signature": False}, audience=audience)["exp"]
+    return {"ok": True, "token": token, "expiresAt": exp, "resource": resource}
+
+
+def _refuse(problem: str | None) -> dict[str, Any]:
+    return {"ok": True} if problem is None else _bad(problem)
+
+
+def _show_menu(body: dict[str, Any]) -> dict[str, Any]:
+    problem = rules.menu_problem(body)
+    if problem is None:
+        menu = NativeMenu.model_validate(
+            {k: v for k, v in body.items() if k not in ("anchor", "action")}
+        )
+        STATE["menu"] = rules.lazy_index(menu)
+    return _refuse(problem)
+
+
+def _surface_content(body: dict[str, Any]) -> str | None:
+    """`updateSurface`: the new definition parts are checked like `showForm`/`showContent`."""
+    if (problem := rules.update_surface_problem(body)) is not None:
+        return problem
+    try:
+        if body.get("blocks"):
+            NativeContent.model_validate({"blocks": body["blocks"], "actions": body.get("actions")})
+        for field in body.get("fields") or []:
+            ActionField.model_validate(field)
+        for page in body.get("pages") or []:
+            ActionPage.model_validate(page)
+    except ValidationError as error:
+        return _refusal(error)[1]
+    return None
+
+
+def _contract_b_answer(
+    action: str, body: dict[str, Any], host: str | None, *, is_post: bool
+) -> dict[str, Any] | None:
+    """The actions of contract 2026-11b; `None` for any other action."""
+    if action == "toast":
+        # `post("toast")` is the old fire-and-forget form and takes whatever it took.
+        return {"ok": True} if is_post else _refuse(rules.toast_problem(body))
+    if action == "showMenu":
+        return _show_menu(body)
+    checks: dict[str, Callable[[], str | None]] = {
+        "menuItems": lambda: rules.menu_items_problem(
+            body, STATE.get("menu"), STATE.setdefault("menu_requests", {})
+        ),
+        "showAlert": lambda: rules.alert_problem(body),
+        "updateSurface": lambda: _surface_content(body),
+        "surfaceSearchResult": lambda: rules.search_answer_problem(body),
+        "setKeyboardToolbar": lambda: rules.keyboard_toolbar_problem(body),
+        "setKeyCommands": lambda: rules.key_commands_problem(body),
+        "showDocument": lambda: rules.document_problem(body, host, update=False),
+        "updateDocument": lambda: rules.document_problem(body, host, update=True),
+        "showPicker": lambda: rules.picker_problem(body),
+        "setChrome": lambda: rules.chrome_problem(body),
+    }
+    check = checks.get(action)
+    return None if check is None else _refuse(check())
+
+
+def _contract_answer(
+    action: str, body: dict[str, Any], host: str | None, *, is_post: bool = False
+) -> dict[str, Any] | None:
+    """The actions of contracts 2026-11 and 2026-11b; `None` for any other action."""
+    if (answer := _contract_b_answer(action, body, host, is_post=is_post)) is not None:
+        return answer
+    if action == "scanDocument":
+        return _scan_document(body)
+    if action == "pickFiles":
+        return _pick_files(body)
+    if action == "dictate":
+        return _dictate(body)
+    if action == "previewFile":
+        return _preview_file(body, host)
+    if action == "setBackInterception":
+        return {"ok": True} if isinstance(body.get("enabled"), bool) else _bad("enabled")
+    if action == "backResult":
+        return {"ok": True} if isinstance(body.get("handled"), bool) else _bad("handled")
+    if action == "getAccessToken":
+        return _access_token(body)
+    return None
+
+
+def _answer(
+    action: str, body: dict[str, Any], host: str | None = None, *, is_post: bool = False
+) -> dict[str, Any]:
+    answer = _contract_answer(action, body, host, is_post=is_post)
+    if answer is not None:
+        return answer
     if action in ("scanText", "scanBarcode"):
         return _scan(action, body)
     if action in ("showForm", "showContent"):
@@ -250,10 +478,6 @@ def _answer(action: str, body: dict[str, Any]) -> dict[str, Any]:
     if action == "getLiveActivities":
         ids = [m["id"] for m in LOG if m.get("action") == "startLiveActivity"]
         return {"ok": True, "ids": ids}
-    if action == "getAccessToken":
-        token = mint_token(**STATE["user"])
-        exp = jwt.decode(token, options={"verify_signature": False})["exp"]
-        return {"ok": True, "token": token, "expiresAt": exp}
     if action in ("navigate", "addReminder", "saveContact", "callPhone"):
         return _device_action(action, body)
     return {"ok": True}
@@ -261,6 +485,13 @@ def _answer(action: str, body: dict[str, Any]) -> dict[str, Any]:
 
 async def _on_document(doc: ReceivedDocument, context: WidgetRequestContext) -> str | None:
     meta = doc.metadata
+    failures = STATE["upload_failures"]
+    if failures.get(doc.filename, 0) > 0:
+        failures[doc.filename] -= 1
+        BACKEND_LOG["uploads"].append(
+            {"filename": doc.filename, "upload_id": meta.upload_id, "failed": True}
+        )
+        raise HTTPException(status_code=503, detail="Try again")
     BACKEND_LOG["uploads"].append(
         {
             "device_id": meta.device_id,
@@ -275,8 +506,8 @@ async def _on_document(doc: ReceivedDocument, context: WidgetRequestContext) -> 
             "size": len(doc.data),
         }
     )
-    if meta.kind != "form" or meta.upload_id is None:
-        return None  # a scan: the old behavior, nothing to hand back
+    if meta.upload_id is None:
+        return None  # an older app: nothing to hand back
     # Idempotent per upload_id: the app repeats an upload after a failed attempt.
     reference = UPLOAD_REFS.get(meta.upload_id)
     if reference is None:
@@ -305,8 +536,31 @@ async def _on_options(
     ]
 
 
+class _SwitchableResults(InMemoryUploadResults):
+    """Remembers answers per `upload_id` only while `STATE["dedupe"]` is on."""
+
+    async def get(self, upload_id: str, context: WidgetRequestContext) -> dict[str, Any] | None:
+        return await super().get(upload_id, context) if STATE["dedupe"] else None
+
+    async def set(
+        self, upload_id: str, response: dict[str, Any], context: WidgetRequestContext
+    ) -> None:
+        if STATE["dedupe"]:
+            await super().set(upload_id, response, context)
+
+
+_RESULTS = _SwitchableResults()
+
+
 def _reset_surface_backend() -> None:
     STATE["reference"] = "id"
+    STATE["dedupe"] = False
+    STATE["upload_failures"] = {}
+    STATE["resources"] = [RESOURCE]
+    STATE["consented"] = []
+    STATE.pop("menu", None)
+    STATE.pop("menu_requests", None)
+    _RESULTS._entries.clear()
     for entries in BACKEND_LOG.values():
         entries.clear()
     FILES.clear()
@@ -323,12 +577,70 @@ class NewCustomer(BaseModel):
     card: list[NativeFileRef] = []
 
 
+def _test_endpoints(router: APIRouter) -> None:
+    """Endpoints that tests use to set up the emulated app and backend (`/test/...`), and
+    the files and the second API that the app downloads from and asks for tokens for."""
+
+    @router.post("/test/document-reference")
+    async def set_document_reference(request: Request) -> None:
+        """`"id"`: the document router answers with an `id`. `"none"`: it answers
+        `{"ok": true}` only and the app hands out the `upload_id`."""
+        STATE["reference"] = (await request.json())["mode"]
+
+    @router.post("/test/document-backend")
+    async def set_document_backend(request: Request) -> None:
+        """`{"dedupe": bool, "failures": {filename: count}}`: whether the document
+        router remembers answers per `upload_id`, and which files fail with a 503
+        that many times first (the app then retries once)."""
+        body = await request.json()
+        STATE["dedupe"] = bool(body.get("dedupe", False))
+        STATE["upload_failures"] = dict(body.get("failures", {}))
+
+    @router.post("/test/html-upload")
+    async def html_upload() -> Response:
+        """An upload endpoint whose answer is not JSON."""
+        return Response("<html>Bad Gateway</html>", media_type="text/html")
+
+    @router.post("/test/menu-expand")
+    async def menu_expand(request: Request) -> None:
+        """The emulated app asks the page for the children of a lazy item: remember which
+        item the `requestId` belongs to, to check the answer (`menuItems`) against it."""
+        body = await request.json()
+        STATE.setdefault("menu_requests", {})[body["requestId"]] = body["itemId"]
+
+    @router.post("/test/token-resources")
+    async def set_token_resources(request: Request) -> None:
+        """`{"resources": [...], "consented": [...]}`: what is configured for this web
+        app in the emulated app, and what the user has already consented to."""
+        body = await request.json()
+        STATE["resources"] = list(body.get("resources", [RESOURCE]))
+        STATE["consented"] = list(body.get("consented", []))
+
+    @router.get("/files/{name}")
+    async def files(name: str) -> Response:
+        """Files that `previewFile` downloads: `missing.pdf` does not exist."""
+        if name.startswith("missing"):
+            raise HTTPException(status_code=404, detail="Not found")
+        if name.endswith(".txt"):
+            return Response("e2e", media_type="text/plain")
+        return Response(b"%PDF-1.4 e2e", media_type="application/pdf")
+
+    @router.get("/api/other-api/me")
+    async def other_api_me(user: EntraUser = Depends(OTHER_AUTH)) -> dict[str, str | None]:
+        """Another API of the same tenant: it takes tokens for `RESOURCE` only."""
+        return {"email": user.email}
+
+
 def _surface_backend() -> APIRouter:
     """What the backend of a web app adds for native forms: the document router
     the media go to, the option lookup, and the page's own endpoint."""
     router = APIRouter()
     router.include_router(
-        create_document_router(on_document_received=_on_document, auth_dependency=insecure_no_auth),
+        create_document_router(
+            on_document_received=_on_document,
+            auth_dependency=insecure_no_auth,
+            upload_results=_RESULTS,
+        ),
         prefix="/api",
     )
     router.include_router(
@@ -363,11 +675,7 @@ def _surface_backend() -> APIRouter:
     async def backend_log() -> dict[str, list[dict[str, Any]]]:
         return BACKEND_LOG
 
-    @router.post("/test/document-reference")
-    async def set_document_reference(request: Request) -> None:
-        """`"id"`: the document router answers with an `id`. `"none"`: it answers
-        `{"ok": true}` only and the app hands out the `upload_id`."""
-        STATE["reference"] = (await request.json())["mode"]
+    _test_endpoints(router)
 
     return router
 
@@ -410,7 +718,12 @@ def create_app() -> FastAPI:
     async def native(action: str, request: Request) -> dict[str, Any]:
         body = await request.json()
         LOG.append({**body, "action": action})
-        return _answer(action, body)
+        is_post = request.query_params.get("post") == "1"
+        # A payload key `action` (the button of a toast) travels as "@action".
+        payload = {k: v for k, v in body.items() if k not in ("@action", "action")}
+        if "@action" in body:
+            payload["action"] = body["@action"]
+        return _answer(action, payload, request.headers.get("host"), is_post=is_post)
 
     @app.get("/native-log")
     async def native_log() -> list[dict[str, Any]]:

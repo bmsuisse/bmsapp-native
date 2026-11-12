@@ -89,6 +89,12 @@ type FieldBase = {
   required?: boolean
   /** Only show the field if another field of the form has a matching value. */
   visibleIf?: ActionCondition
+  /**
+   * Native forms and content only (feature `liveSurfaces`): every change of the value
+   * calls `window.onNativeSurfaceChange({ id, fieldId, value })` (text input debounced
+   * 300 ms). `showForm(…, { onChange })` sets it for you and handles the call.
+   */
+  live?: boolean
 }
 
 /** Validation of text input. An invalid field is marked inline and blocks "Continue"/submit. */
@@ -128,6 +134,13 @@ export type ActionSearchField = FieldBase & {
   type: 'search'
   /** From this many characters on the app searches; 0 loads suggestions on open. Default 2. */
   minQueryLength?: number
+  /**
+   * `page`: the page answers the search itself (feature `pageSearch`): typing calls
+   * `window.onNativeSurfaceSearch({ id, fieldId, query, requestId })` and the page answers
+   * with `surfaceSearchResult`; `showForm(…, { onSearch })` handles both. Without
+   * `source` the app asks your backend (`widgetOptionsPath`) as before.
+   */
+  source?: 'page'
   value?: LooseValue
   /** Display text for the prefilled `value`. */
   valueLabel?: string

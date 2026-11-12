@@ -1,0 +1,191 @@
+{
+  "description": "Hardware key commands (feature keyCommands): setKeyCommands and onNativeKeyCommand.",
+  "options": {
+    "valid": [
+      {
+        "name": "a few commands",
+        "value": {
+          "commands": [
+            {
+              "id": "search",
+              "input": "k",
+              "modifiers": ["command"],
+              "title": "Search",
+              "group": "Offers"
+            },
+            {
+              "id": "next",
+              "input": "down",
+              "modifiers": [],
+              "title": "Next line",
+              "group": "Navigate"
+            },
+            {
+              "id": "close",
+              "input": "escape",
+              "modifiers": [],
+              "title": "Close"
+            },
+            {
+              "id": "bold",
+              "input": "b",
+              "modifiers": ["command", "shift", "option", "control"],
+              "title": "Bold"
+            }
+          ]
+        }
+      },
+      {
+        "name": "remove them",
+        "value": {
+          "commands": []
+        }
+      },
+      {
+        "name": "60 commands",
+        "value": {
+          "commands": {
+            "@repeat": 60,
+            "of": {
+              "id": "c{k}",
+              "input": "a",
+              "modifiers": ["command"],
+              "title": "Command {k}"
+            }
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "61 commands",
+        "value": {
+          "commands": {
+            "@repeat": 61,
+            "of": {
+              "id": "c{k}",
+              "input": "a",
+              "modifiers": ["command"],
+              "title": "Command {k}"
+            }
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "input of two characters",
+        "value": {
+          "commands": [
+            {
+              "id": "x",
+              "input": "ab",
+              "modifiers": [],
+              "title": "X"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an input that is not a key name",
+        "value": {
+          "commands": [
+            {
+              "id": "x",
+              "input": "enter",
+              "modifiers": [],
+              "title": "X"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an unknown modifier",
+        "value": {
+          "commands": [
+            {
+              "id": "x",
+              "input": "k",
+              "modifiers": ["meta"],
+              "title": "X"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "modifiers missing",
+        "value": {
+          "commands": [
+            {
+              "id": "x",
+              "input": "k",
+              "title": "X"
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "no title",
+        "value": {
+          "commands": [
+            {
+              "id": "x",
+              "input": "k",
+              "modifiers": []
+            }
+          ]
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "commands is not a list",
+        "value": {
+          "commands": {
+            "id": "x"
+          }
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "set",
+        "value": {
+          "ok": true
+        }
+      },
+      {
+        "name": "not available",
+        "value": {
+          "ok": false,
+          "error": "unavailable"
+        }
+      },
+      {
+        "name": "no customChrome capability",
+        "value": {
+          "ok": false,
+          "error": "capability"
+        }
+      }
+    ],
+    "invalid": []
+  },
+  "events": {
+    "keyCommand": {
+      "valid": [
+        {
+          "name": "a command",
+          "value": {
+            "id": "search"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "description": "Toasts with an action (feature toastActions): the call with a response, `{ message, style?, duration?, action? }`.",
+  "options": {
+    "valid": [
+      {
+        "name": "a plain toast with a response",
+        "value": {
+          "message": "Saved"
+        }
+      },
+      {
+        "name": "style and duration",
+        "value": {
+          "message": "Saved",
+          "style": "success",
+          "duration": 4
+        }
+      },
+      {
+        "name": "with an action",
+        "value": {
+          "message": "Offer deleted",
+          "action": {
+            "id": "undo",
+            "label": "Undo"
+          }
+        }
+      },
+      {
+        "name": "the shortest duration",
+        "value": {
+          "message": "x",
+          "duration": 1
+        }
+      },
+      {
+        "name": "the longest duration",
+        "value": {
+          "message": "x",
+          "duration": 10
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "duration 0.5",
+        "value": {
+          "message": "x",
+          "duration": 0.5
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "duration 11",
+        "value": {
+          "message": "x",
+          "duration": 11
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an action without a label",
+        "value": {
+          "message": "x",
+          "action": {
+            "id": "undo"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an action without an id",
+        "value": {
+          "message": "x",
+          "action": {
+            "label": "Undo"
+          }
+        },
+        "error": "invalid"
+      },
+      {
+        "name": "an unknown style",
+        "value": {
+          "message": "x",
+          "style": "loud"
+        },
+        "error": "invalid"
+      }
+    ]
+  },
+  "results": {
+    "valid": [
+      {
+        "name": "shown",
+        "value": {
+          "ok": true,
+          "toastId": "t-1"
+        }
+      },
+      {
+        "name": "not available",
+        "value": {
+          "ok": false,
+          "error": "unavailable"
+        }
+      },
+      {
+        "name": "no customChrome capability",
+        "value": {
+          "ok": false,
+          "error": "capability"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "ok without a toastId",
+        "value": {
+          "ok": true
+        },
+        "error": "failed"
+      }
+    ]
+  },
+  "events": {
+    "toastAction": {
+      "valid": [
+        {
+          "name": "the action was tapped",
+          "value": {
+            "toastId": "t-1",
+            "id": "undo"
+          }
+        }
+      ]
+    }
+  }
+}

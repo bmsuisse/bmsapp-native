@@ -1,0 +1,29 @@
+{
+  "description": "Back interception (feature backInterception): setBackInterception, the payload of window.onNativeBackRequested and the backResult the page answers within 800 ms.",
+  "setBackInterception": {
+    "valid": [
+      { "name": "on", "value": { "enabled": true } },
+      { "name": "off", "value": { "enabled": false } }
+    ],
+    "invalid": [
+      { "name": "enabled missing", "value": {}, "error": "invalid" },
+      { "name": "enabled a string", "value": { "enabled": "yes" }, "error": "invalid" }
+    ]
+  },
+  "events": {
+    "valid": [
+      { "name": "button", "value": { "source": "button" } },
+      { "name": "swipe", "value": { "source": "swipe" } }
+    ]
+  },
+  "backResult": {
+    "valid": [
+      { "name": "handled", "value": { "handled": true } },
+      { "name": "not handled", "value": { "handled": false } }
+    ],
+    "invalid": [
+      { "name": "handled missing", "value": {}, "error": "invalid" },
+      { "name": "handled a string", "value": { "handled": "true" }, "error": "invalid" }
+    ]
+  }
+}
